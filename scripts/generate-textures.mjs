@@ -325,12 +325,31 @@ function glass(d, w, tx, ty) {
 
 function water(d, w, tx, ty) {
   paintTile16Mc(d, w, tx, ty, (i, j, ttx, tty) => {
-    const n = hash2(i + ttx * 79, j + tty * 83, 888);
-    const wave = Math.sin((i + j) * 0.55 + ttx + tty) * 0.5 + 0.5;
-    const r = 28 + Math.floor(n * 18 + wave * 12);
-    const g = 92 + Math.floor(n * 22 + wave * 16);
-    const b = 210 + Math.floor(hash2(i, j, 52) * 28);
-    const a = Math.floor(255 * (0.48 + n * 0.16));
+    const n = hash2(i + ttx * 41, j + tty * 47, 901);
+    const n2 = hash2(i * 2 + 11, j * 2 + 13, 905);
+    const n3 = hash2(j, i + ttx, 906);
+    const depthGrad = (j / Math.max(1, G - 1)) * 0.42;
+    const hWave = Math.sin((i * 0.42 + j * 0.31 + tty * 0.08) * 1.05) * 0.5 + 0.5;
+    let r = Math.floor(28 + depthGrad * 22 + hWave * 14 + n * 9);
+    let g = Math.floor(108 + depthGrad * 28 + hWave * 22 + n2 * 15);
+    let b = Math.floor(205 + depthGrad * 18 + hWave * 16 + n3 * 11);
+    const caust = Math.sin((i + j) * 0.72 + (i - j) * 0.38 + ttx * 0.15) * 0.5 + 0.5;
+    if (caust > 0.8 && n > 0.52) {
+      r = Math.min(255, r + 22);
+      g = Math.min(255, g + 30);
+      b = Math.min(255, b + 20);
+    }
+    if (caust < 0.2 && n2 < 0.38) {
+      r = Math.floor(r * 0.7);
+      g = Math.floor(g * 0.76);
+      b = Math.floor(b * 0.84);
+    }
+    if (hash2(i, j, 907) > 0.93) {
+      r = Math.min(255, r + 30);
+      g = Math.min(255, g + 36);
+      b = 255;
+    }
+    const a = Math.floor(255 * (0.55 + n * 0.09 + caust * 0.1));
     return [r, g, b, a];
   });
 }
@@ -1491,23 +1510,28 @@ function mobSquidMantle(buf, w) {
       const nx = n2(x, y, 801);
       const ny = n2(x >> 2, y >> 2, 802);
       const cy = y + CH / 2;
-      const belly = cy > 64 * 0.58;
-      const spot = n2(x, y, 803) > 0.72;
+      const dorsal = cy < 64 * 0.42;
+      const spot = n2(x, y, 803) > 0.68;
+      const pink = n2(x + 17, y + 23, 805) > 0.82;
       let r;
       let g;
       let b;
-      if (belly) {
-        r = Math.floor(62 + nx * 24);
-        g = Math.floor(88 + ny * 28);
-        b = Math.floor(168 + nx * 28);
+      if (pink) {
+        r = Math.floor(132 + nx * 22);
+        g = Math.floor(96 + ny * 18);
+        b = Math.floor(118 + nx * 16);
+      } else if (dorsal) {
+        r = Math.floor(36 + nx * 18);
+        g = Math.floor(28 + ny * 16);
+        b = Math.floor(52 + nx * 20);
       } else if (spot) {
-        r = Math.floor(28 + nx * 16);
-        g = Math.floor(42 + ny * 18);
-        b = Math.floor(108 + nx * 22);
+        r = Math.floor(48 + nx * 20);
+        g = Math.floor(38 + ny * 18);
+        b = Math.floor(72 + nx * 22);
       } else {
-        r = Math.floor(38 + nx * 20);
-        g = Math.floor(58 + ny * 22);
-        b = Math.floor(138 + nx * 26);
+        r = Math.floor(72 + nx * 22);
+        g = Math.floor(58 + ny * 20);
+        b = Math.floor(92 + nx * 18);
       }
       fillRectMc(buf, w, x, y, CH, CH, r, g, b, 255);
     }
@@ -1520,19 +1544,34 @@ function mobSquidTentacle(buf, w) {
     for (let x = 0; x < 64; x += CH) {
       const v = n2(x, y, 804);
       const t = y / 64;
-      const lift = (1 - t) * 18;
-      fillRectMc(
-        buf,
-        w,
-        x,
-        y,
-        CH,
-        CH,
-        Math.floor(34 + v * 14 + lift * 0.3),
-        Math.floor(32 + v * 12 + lift * 0.25),
-        Math.floor(58 + v * 16 + lift * 0.4),
-        255,
-      );
+      const sucker = t > 0.55 && n2(x, y, 806) > 0.62;
+      if (sucker) {
+        fillRectMc(
+          buf,
+          w,
+          x,
+          y,
+          CH,
+          CH,
+          Math.floor(102 + v * 16),
+          Math.floor(68 + v * 14),
+          Math.floor(88 + v * 12),
+          255,
+        );
+      } else {
+        fillRectMc(
+          buf,
+          w,
+          x,
+          y,
+          CH,
+          CH,
+          Math.floor(88 + v * 18),
+          Math.floor(62 + v * 16 + t * 8),
+          Math.floor(78 + v * 14 + t * 6),
+          255,
+        );
+      }
     }
   }
 }

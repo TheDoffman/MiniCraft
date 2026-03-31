@@ -14,20 +14,23 @@ import { PIG_HP } from './pigMob.js';
 
 export const SQUID_HP = PIG_HP;
 
-const SQUID_HW = 0.28;
-const SQUID_H = 0.52;
-const SQUID_HD = 0.28;
+const SQUID_HW = 0.32;
+const SQUID_H = 0.5;
+const SQUID_HD = 0.32;
 const SQUID_WANDER_SPEED = 0.42;
 const SQUID_VY_SPEED = 0.32;
 const SQUID_DRAG = 2.4;
 const SQUID_TENTACLE_SPEED = 8;
 
-const MANTLE_CY = 0.33;
-const MANTLE_H = 0.24;
-const MANTLE_W = 0.36;
+/** Body is elongated on Z (swim direction) like a squid, not a vertical jellyfish bell. */
+const MANTLE_CY = 0.34;
+const MANTLE_H = 0.2;
+const MANTLE_W = 0.32;
+const MANTLE_D = 0.46;
 const TENT_ATTACH_Y = MANTLE_CY - MANTLE_H / 2;
-const TENT_LEN = 0.2;
-const TENT_RING_R = 0.14;
+const TENT_LEN = 0.26;
+const TENT_RING_R = 0.11;
+const TENT_THICK = 0.036;
 
 /** @param {{ x: number, y: number, z: number }} s */
 export function getSquidBodyAABB(s) {
@@ -58,7 +61,7 @@ export function raycastNearestSquidWithT(ox, oy, oz, dx, dy, dz, maxDist, squids
 }
 
 /**
- * Minecraft-style squid: vertical mantle, side eyes, eight tentacles hanging from the rim.
+ * Minecraft-style squid: horizontal mantle (long on Z), eyes on front, eight arms under the rim.
  *
  * @returns {{ group: THREE.Group, tentacles: THREE.Group[], materials: THREE.MeshLambertMaterial[] }}
  */
@@ -77,43 +80,36 @@ export function createSquidMesh() {
 
   const group = new THREE.Group();
 
-  const mantle = new THREE.Mesh(new THREE.BoxGeometry(MANTLE_W, MANTLE_H, MANTLE_W), mantleMat);
+  const mantle = new THREE.Mesh(
+    new THREE.BoxGeometry(MANTLE_W, MANTLE_H, MANTLE_D),
+    mantleMat,
+  );
   mantle.position.set(0, MANTLE_CY, 0);
   mantle.castShadow = true;
   mantle.receiveShadow = true;
   group.add(mantle);
 
-  const cap = new THREE.Mesh(
-    new THREE.BoxGeometry(MANTLE_W * 0.82, 0.07, MANTLE_W * 0.82),
-    mantleMat,
-  );
-  cap.position.set(0, MANTLE_CY + MANTLE_H / 2 + 0.035, 0);
-  cap.castShadow = true;
-  cap.receiveShadow = true;
-  group.add(cap);
-
-  const eyeGeo = new THREE.BoxGeometry(0.045, 0.11, 0.03);
+  const eyeGeo = new THREE.BoxGeometry(0.05, 0.09, 0.028);
+  const zEye = MANTLE_D * 0.5 + 0.014;
   const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
-  eyeL.position.set(-(MANTLE_W / 2 + 0.012), MANTLE_CY + 0.02, 0.06);
+  eyeL.position.set(-MANTLE_W * 0.22, MANTLE_CY + 0.018, zEye);
   eyeL.castShadow = true;
   eyeL.receiveShadow = true;
   const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
-  eyeR.position.set(MANTLE_W / 2 + 0.012, MANTLE_CY + 0.02, 0.06);
+  eyeR.position.set(MANTLE_W * 0.22, MANTLE_CY + 0.018, zEye);
   eyeR.castShadow = true;
   eyeR.receiveShadow = true;
   group.add(eyeL, eyeR);
 
   /** @type {THREE.Group[]} */
   const tentacles = [];
-  const tentGeo = new THREE.BoxGeometry(0.052, TENT_LEN, 0.052);
+  const tentGeo = new THREE.BoxGeometry(TENT_THICK, TENT_LEN, TENT_THICK);
   for (let i = 0; i < 8; i++) {
     const ang = (i / 8) * Math.PI * 2;
     const pivot = new THREE.Group();
-    pivot.position.set(
-      Math.cos(ang) * TENT_RING_R,
-      TENT_ATTACH_Y,
-      Math.sin(ang) * TENT_RING_R,
-    );
+    const rx = Math.cos(ang) * TENT_RING_R;
+    const rz = Math.sin(ang) * TENT_RING_R;
+    pivot.position.set(rx, TENT_ATTACH_Y, rz);
     const mesh = new THREE.Mesh(tentGeo, tentMat);
     mesh.position.set(0, -TENT_LEN / 2, 0);
     mesh.castShadow = true;
@@ -298,9 +294,12 @@ export function updateSquid(squid, world, dt) {
   const w = Math.sin(squid.tentaclePhase);
   for (let i = 0; i < squid.tentacles.length; i++) {
     const pivot = squid.tentacles[i];
-    const o = Math.sin(squid.tentaclePhase + i * 0.78) * 0.52;
-    pivot.rotation.x = o + w * 0.1;
-    pivot.rotation.z = Math.sin(squid.tentaclePhase * 1.05 + i * 1.1) * 0.14;
+    const ang = (i / 8) * Math.PI * 2;
+    const baseX = 0.16;
+    const o = Math.sin(squid.tentaclePhase + i * 0.78) * 0.24;
+    pivot.rotation.x = baseX + o + w * 0.045;
+    pivot.rotation.z =
+      Math.sin(squid.tentaclePhase * 1.02 + i * 1.1) * 0.065 + Math.cos(ang) * 0.05;
   }
 
   if (sp > 0.04) {

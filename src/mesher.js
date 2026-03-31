@@ -15,6 +15,8 @@ import { pushCrossPlant } from './plantMesh.js';
 import { TorchAttach, effectiveTorchAttach } from './torchAttach.js';
 
 const ATLAS_SIZE = ATLAS_TILES * TILE_PX;
+/** Surface water top is slightly below the block top for a visible edge next to shores. */
+const WATER_TOP_INSET = 1 / 16;
 
 function uvCorners(tx, ty) {
   const u0 = (tx * TILE_PX) / ATLAS_SIZE;
@@ -739,13 +741,18 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
           wBuf = null;
         }
         const wdep = def.fluid ? normalizedWaterMurk(waterColumnCache, xa, xb, za, x, z) : 0;
+        const waterAbove =
+          !!def.fluid &&
+          world.inBounds(x, y + 1, z) &&
+          world.get(x, y + 1, z) === BlockId.WATER;
+        const yTopV = def.fluid && !waterAbove ? y + 1 - WATER_TOP_INSET : y + 1;
 
         if (!shouldCull(world, x, y, z, 1, 0, 0, isAlpha)) {
           const c = uvCorners(def.side[0], def.side[1]);
           const ax = x + 1;
           const a0 = vertexAO(world, ax, y, z, 0, -1, 0, 0, 0, -1);
-          const a1 = vertexAO(world, ax, y + 1, z, 0, 1, 0, 0, 0, -1);
-          const a2 = vertexAO(world, ax, y + 1, z + 1, 0, 1, 0, 0, 0, 1);
+          const a1 = vertexAO(world, ax, yTopV, z, 0, 1, 0, 0, 0, -1);
+          const a2 = vertexAO(world, ax, yTopV, z + 1, 0, 1, 0, 0, 0, 1);
           const a3 = vertexAO(world, ax, y, z + 1, 0, -1, 0, 0, 0, 1);
           pushQuad(
             positions,
@@ -758,8 +765,8 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             0,
             [
               [ax, y, z],
-              [ax, y + 1, z],
-              [ax, y + 1, z + 1],
+              [ax, yTopV, z],
+              [ax, yTopV, z + 1],
               [ax, y, z + 1],
             ],
             [c.bl, c.tl, c.tr, c.br],
@@ -771,8 +778,8 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
         if (!shouldCull(world, x, y, z, -1, 0, 0, isAlpha)) {
           const c = uvCorners(def.side[0], def.side[1]);
           const a0 = vertexAO(world, x, y, z + 1, 0, -1, 0, 0, 0, 1);
-          const a1 = vertexAO(world, x, y + 1, z + 1, 0, 1, 0, 0, 0, 1);
-          const a2 = vertexAO(world, x, y + 1, z, 0, 1, 0, 0, 0, -1);
+          const a1 = vertexAO(world, x, yTopV, z + 1, 0, 1, 0, 0, 0, 1);
+          const a2 = vertexAO(world, x, yTopV, z, 0, 1, 0, 0, 0, -1);
           const a3 = vertexAO(world, x, y, z, 0, -1, 0, 0, 0, -1);
           pushQuad(
             positions,
@@ -785,8 +792,8 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             0,
             [
               [x, y, z + 1],
-              [x, y + 1, z + 1],
-              [x, y + 1, z],
+              [x, yTopV, z + 1],
+              [x, yTopV, z],
               [x, y, z],
             ],
             [c.br, c.tr, c.tl, c.bl],
@@ -797,7 +804,7 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
         }
         if (!shouldCull(world, x, y, z, 0, 1, 0, isAlpha)) {
           const c = uvCorners(def.top[0], def.top[1]);
-          const ay = y + 1;
+          const ay = yTopV;
           const a0 = vertexAO(world, x, ay, z, -1, 0, 0, 0, 0, -1);
           const a1 = vertexAO(world, x + 1, ay, z, 1, 0, 0, 0, 0, -1);
           const a2 = vertexAO(world, x + 1, ay, z + 1, 1, 0, 0, 0, 0, 1);
@@ -854,8 +861,8 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
           const c = uvCorners(def.side[0], def.side[1]);
           const az = z + 1;
           const a0 = vertexAO(world, x + 1, y, az, 1, 0, 0, 0, -1, 0);
-          const a1 = vertexAO(world, x + 1, y + 1, az, 1, 0, 0, 0, 1, 0);
-          const a2 = vertexAO(world, x, y + 1, az, -1, 0, 0, 0, 1, 0);
+          const a1 = vertexAO(world, x + 1, yTopV, az, 1, 0, 0, 0, 1, 0);
+          const a2 = vertexAO(world, x, yTopV, az, -1, 0, 0, 0, 1, 0);
           const a3 = vertexAO(world, x, y, az, -1, 0, 0, 0, -1, 0);
           pushQuad(
             positions,
@@ -868,8 +875,8 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             1,
             [
               [x + 1, y, az],
-              [x + 1, y + 1, az],
-              [x, y + 1, az],
+              [x + 1, yTopV, az],
+              [x, yTopV, az],
               [x, y, az],
             ],
             [c.br, c.tr, c.tl, c.bl],
@@ -881,8 +888,8 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
         if (!shouldCull(world, x, y, z, 0, 0, -1, isAlpha)) {
           const c = uvCorners(def.side[0], def.side[1]);
           const a0 = vertexAO(world, x, y, z, -1, 0, 0, 0, -1, 0);
-          const a1 = vertexAO(world, x, y + 1, z, -1, 0, 0, 0, 1, 0);
-          const a2 = vertexAO(world, x + 1, y + 1, z, 1, 0, 0, 0, 1, 0);
+          const a1 = vertexAO(world, x, yTopV, z, -1, 0, 0, 0, 1, 0);
+          const a2 = vertexAO(world, x + 1, yTopV, z, 1, 0, 0, 0, 1, 0);
           const a3 = vertexAO(world, x + 1, y, z, 1, 0, 0, 0, -1, 0);
           pushQuad(
             positions,
@@ -895,8 +902,8 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             -1,
             [
               [x, y, z],
-              [x, y + 1, z],
-              [x + 1, y + 1, z],
+              [x, yTopV, z],
+              [x + 1, yTopV, z],
               [x + 1, y, z],
             ],
             [c.bl, c.tl, c.tr, c.br],

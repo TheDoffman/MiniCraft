@@ -6,6 +6,11 @@ import {
   configureAtlasTextureSettings,
 } from './textures.js';
 import {
+  buildMinecraftStyleMoonCanvas,
+  buildMinecraftStyleSunCanvas,
+  canvasToCelestialTexture,
+} from './celestialSprites.js';
+import {
   BLOCKS,
   BlockId,
   TILE_PX,
@@ -19,6 +24,7 @@ import {
 } from './blocktypes.js';
 import { Player } from './player.js';
 import { raycastBlocks } from './raycast.js';
+import { buildSelectionOutlineGeometry } from './selectionOutline.js';
 import { aabbFullySubmergedInFluid } from './physics.js';
 import { CHUNK_XZ, regionForChunk, chunkKeysForBlock } from './chunks.js';
 import { saveToLocalStorage, loadFromLocalStorage } from './save.js';
@@ -63,6 +69,12 @@ import {
   disposeCloudLayer,
 } from './cloudLayer.js';
 import { sampleWeather, smoothWeatherSample } from './weather.js';
+import {
+  createWeatherEventState,
+  resetWeatherEventState,
+  tickWeatherEvents,
+  mergeWeatherEventBase,
+} from './weatherEvents.js';
 import { computeRainParticleExposure, computeRainShelter } from './weatherSoundExposure.js';
 import { computeCaveLightFactors } from './caveLighting.js';
 import {
@@ -100,6 +112,7 @@ import {
   serializeMobsState,
   disposeMobsSharedResources,
 } from './mobs.js';
+import { createGroundDrop, tickGroundDrops } from './mobDrops.js';
 import { disposePigMaterialBundle } from './pigTextures.js';
 import { disposeCowMaterialBundle } from './cowTextures.js';
 import { disposeSquidMaterialBundle } from './squidTextures.js';
@@ -120,7 +133,6 @@ import { torchSupportDeltaToAttach, TorchAttach } from './torchAttach.js';
 import { recomputeWaterAround, needsWaterRecomputeAfterBreak } from './waterFlow.js';
 import {
   WORLD_H,
-  CHUNK_RENDER_RADIUS,
   CHUNK_MESH_MARGIN,
   MAX_HEALTH,
   MAX_STAMINA,
@@ -274,6 +286,7 @@ const deathReason = document.getElementById('deathReason');
 const respawnBtn = document.getElementById('respawnBtn');
 const toastContainer = document.getElementById('toastContainer');
 const coordsHudEl = document.getElementById('coordsHud');
+const fpsHudEl = document.getElementById('fpsHud');
 const furnacePanelEl = document.getElementById('furnacePanel');
 const furnaceInputMount = document.getElementById('furnaceInput');
 const furnaceFuelMount = document.getElementById('furnaceFuel');
@@ -389,17 +402,21 @@ function readSeedFromInput() {
   return ((n % 2147483647) + 2147483647) % 2147483647;
 }
 
+/** No-op until {@link createInventoryPlayerPreview} runs (main renderer sizes earlier in init). */
+let resizeInvPlayerPreview = () => {};
+
 const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: false,
   alpha: false,
   powerPreference: 'high-performance',
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
+applyRendererPixelRatioAndSize();
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+/** Kept in sync with {@link applyShadowQualityFromSettings}. */
+let shadowMapResolution = 2048;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87b8e8);
@@ -446,6 +463,7 @@ function getInteractionRayOriginAndDir() {
 let fallCameraShake = 0;
 
 function addFallDamageCameraShake(damage) {
+  if (!gameSettings.cameraShake) return;
   const bump = Math.min(0.024, damage * FALL_SHAKE_PER_DAMAGE);
   fallCameraShake = Math.min(FALL_SHAKE_MAX, fallCameraShake + bump);
 }
@@ -465,13 +483,12 @@ sun.position.set(40, 80, 30);
 scene.add(sun);
 scene.add(sun.target);
 
-const SHADOW_MAP = 2048;
 const SHADOW_ORTHO = 72;
 const SHADOW_NEAR = 2;
 const SHADOW_FAR = 300;
 function setupDirShadow(light) {
   light.castShadow = true;
-  light.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
+  light.shadow.mapSize.set(shadowMapResolution, shadowMapResolution);
   light.shadow.camera.near = SHADOW_NEAR;
   light.shadow.camera.far = SHADOW_FAR;
   light.shadow.camera.left = -SHADOW_ORTHO;
@@ -490,7 +507,7 @@ scene.add(moon);
 scene.add(moon.target);
 setupDirShadow(moon);
 
-/** Hand pass uses camera layer 1; lights must match or the hand is unlit. */
+/** FP hand uses camera layer 1; lights must match or the arm is unlit in the hand pass. */
 sun.layers.enable(1);
 hemi.layers.enable(1);
 moon.layers.enable(1);
@@ -541,54 +558,28 @@ const starField = createStarField(0, 0);
 scene.add(starField);
 
 function createSunSpriteMaterial() {
-  const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 128;
-  const ctx = c.getContext('2d');
-  if (!ctx) throw new Error('2d context');
-  const g = ctx.createRadialGradient(64, 64, 2, 64, 64, 60);
-  g.addColorStop(0, 'rgba(255,255,250,1)');
-  g.addColorStop(0.1, 'rgba(255,248,210,0.92)');
-  g.addColorStop(0.28, 'rgba(255,220,120,0.45)');
-  g.addColorStop(0.55, 'rgba(255,190,70,0.12)');
-  g.addColorStop(1, 'rgba(255,170,40,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 128, 128);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
+  const tex = canvasToCelestialTexture(buildMinecraftStyleSunCanvas());
   const mat = new THREE.SpriteMaterial({
     map: tex,
-    color: 0xfff8e8,
+    color: 0xfffef0,
     transparent: true,
     opacity: 1,
-    depthTest: false,
+    /* Must test depth or the sprite draws after chunks and shows through solid ground. */
+    depthTest: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
   });
   return { mat, tex };
 }
 
 function createMoonSpriteMaterial() {
-  const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 128;
-  const ctx = c.getContext('2d');
-  if (!ctx) throw new Error('2d context');
-  const g = ctx.createRadialGradient(64, 64, 1, 64, 64, 56);
-  g.addColorStop(0, 'rgba(248,250,255,0.98)');
-  g.addColorStop(0.18, 'rgba(200,210,232,0.72)');
-  g.addColorStop(0.42, 'rgba(150,168,205,0.38)');
-  g.addColorStop(1, 'rgba(110,128,168,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 128, 128);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
+  const tex = canvasToCelestialTexture(buildMinecraftStyleMoonCanvas());
   const mat = new THREE.SpriteMaterial({
     map: tex,
-    color: 0xd8dff0,
+    color: 0xe8ecf5,
     transparent: true,
     opacity: 1,
-    depthTest: false,
+    depthTest: true,
     depthWrite: false,
     blending: THREE.NormalBlending,
   });
@@ -675,7 +666,7 @@ setBlockParticleRenderer(renderer);
 
 const fpHand = createFirstPersonHand(atlasTex);
 fpHand.visible = false;
-/** Layer 1 = drawn in a second pass after depth clear so transparent world geo can't cover the hand. */
+/** Layer 1 = second pass after depth clear so cutout/water cannot cover the hand. */
 const FP_HAND_LAYER = 1;
 fpHand.traverse((obj) => {
   if ('layers' in obj && obj.layers) {
@@ -698,7 +689,7 @@ const worldMat = new THREE.MeshLambertMaterial({
   vertexColors: true,
 });
 
-/** Updated each frame for water surface UV shimmer (see {@link attachWaterDepthMurkShader}). */
+/** Slow UV drift on water (see {@link attachWaterDepthMurkShader}). */
 const waterShimmerUniforms = { uWaterTime: { value: 0 } };
 
 function attachWaterDepthMurkShader(/** @type {THREE.MeshLambertMaterial} */ mat) {
@@ -729,16 +720,12 @@ uniform float uWaterTime;
       .replace(
         '#include <map_fragment>',
         `#ifdef USE_MAP
-	float _wt = uWaterTime;
-	/* Shimmer in local tile UV (0–1 per atlas cell), then clamp — avoids sampling neighbor tiles (grid gaps). */
-	vec2 _tf = fract(vMapUv * 16.0);
-	vec2 _tb = floor(vMapUv * 16.0 + 0.0001) / 16.0;
-	vec2 _sh = vec2(
-		sin(_wt * 2.05 + _tf.y * 31.0) * 0.052 + sin(_wt * 0.42 + _tf.x * 38.0) * 0.034,
-		cos(_wt * 1.68 + _tf.x * 27.0) * 0.046 + sin(_wt * 0.88 + _tf.x * 17.0 - _tf.y * 11.0) * 0.039
-	);
-	_tf = clamp(_tf + _sh, vec2(0.014), vec2(0.986));
-	vec2 _wShUv = _tb + _tf / 16.0;
+		float _wt = uWaterTime;
+	vec2 _cell = floor(vMapUv * 16.0 + 0.0001);
+	vec2 _loc = fract(vMapUv * 16.0);
+	vec2 _flow = vec2(_wt * 0.022, _wt * 0.016);
+	vec2 _tf = fract(_loc + _flow);
+	vec2 _wShUv = (_cell + _tf) / 16.0;
 	vec4 sampledDiffuseColor = texture2D( map, _wShUv );
 	#ifdef DECODE_VIDEO_TEXTURE
 		sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
@@ -758,10 +745,10 @@ varying float vWaterDepth;
 {
 	float wd = clamp( vWaterDepth, 0.0, 1.0 );
 	float murk = 1.0 - exp( -wd * 4.8 );
-	vec3 deepCol = vec3( 0.02, 0.065, 0.12 );
-	diffuseColor.rgb = mix( diffuseColor.rgb, deepCol, murk * 0.93 );
-	float a1 = diffuseColor.a + murk * 0.58;
-	diffuseColor.a = min( a1, 0.96 );
+	vec3 deepCol = vec3( 0.035, 0.12, 0.2 );
+	diffuseColor.rgb = mix( diffuseColor.rgb, deepCol, murk * 0.9 );
+	float a1 = diffuseColor.a + murk * 0.52;
+	diffuseColor.a = min( a1, 0.94 );
 }
 `,
       );
@@ -798,7 +785,7 @@ const waterMat = new THREE.MeshLambertMaterial({
   polygonOffsetUnits: 1,
 });
 attachWaterDepthMurkShader(waterMat);
-waterMat.customProgramCacheKey = () => 'waterdepthW+shimmer';
+waterMat.customProgramCacheKey = () => 'waterdepthW+flow';
 
 const mainMenuTerrainCanvas = document.getElementById('mainMenuTerrainCanvas');
 if (mainMenuTerrainCanvas instanceof HTMLCanvasElement && startEl) {
@@ -852,15 +839,17 @@ function getMineTime(blockId, heldBlockId) {
   return Math.max(0.05, (hardness * BASE_MINE_TIME) / speed);
 }
 
-const selectionGeom = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.001, 1.001, 1.001));
+let selectionOutlineKey = '';
 const selectionMat = new THREE.LineBasicMaterial({
   color: 0xffffff,
   linewidth: 1,
   transparent: true,
   opacity: 0.85,
 });
-const selection = new THREE.LineSegments(selectionGeom, selectionMat);
+const selectionGeomInitial = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.001, 1.001, 1.001));
+const selection = new THREE.LineSegments(selectionGeomInitial, selectionMat);
 selection.visible = false;
+selection.frustumCulled = false;
 scene.add(selection);
 scene.add(crackMesh);
 
@@ -888,6 +877,7 @@ playerModel.traverse((obj) => {
 scene.add(playerModel);
 
 const invPlayerPreview = createInventoryPlayerPreview(invPlayerPreviewMount, atlasTex);
+resizeInvPlayerPreview = () => invPlayerPreview.resize();
 
 /* block_atlas.png override removed — all textures are now generated
    procedurally by buildAtlasCanvas() so new blocks always appear correctly. */
@@ -946,15 +936,22 @@ let lastStreamChunkX = NaN;
 let lastStreamChunkZ = NaN;
 /** Bumps when chunk meshes are added/removed so draw visibility is recomputed. */
 let chunkVisibilityEpoch = 0;
-/** Chunk keys not yet meshed; drained by {@link processChunkBuildQueue} with a per-frame cap. */
+/** Chunk keys not yet meshed; drained by {@link processChunkBuildQueue} with time + count limits. */
 const chunkBuildPending = new Set();
-/** Max `rebuildChunk` calls per frame while playing (keeps frame time stable while moving). */
-const MAX_CHUNK_BUILDS_PER_FRAME_PLAY = 4;
-/** While title or pause is open, build faster so the queue drains before / without hogging Play. */
-const MAX_CHUNK_BUILDS_PER_FRAME_MENU = 12;
-/** When many chunks are still pending in-game, allow a few extra builds per frame (fades as queue shrinks). */
-const CHUNK_BACKLOG_BOOST_THRESHOLD = 96;
-const MAX_CHUNK_BUILDS_PER_FRAME_BACKLOG = 8;
+/** Hard cap on chunks built in one frame (safety valve; {@link CHUNK_BUILD_TIME_BUDGET_MS_PLAY} is primary). */
+const CHUNK_BUILD_MAX_PER_FRAME_PLAY = 3;
+const CHUNK_BUILD_MAX_PER_FRAME_MENU = 24;
+/** Stop meshing after this much wall time so movement & rendering stay smooth (~60 FPS budget). */
+const CHUNK_BUILD_TIME_BUDGET_MS_PLAY = 2.6;
+/** Slightly more time when far behind so the world catches up without 8-chunk spikes. */
+const CHUNK_BUILD_TIME_BUDGET_MS_PLAY_CATCHUP = 3.4;
+const CHUNK_BUILD_TIME_BUDGET_MS_MENU = 14;
+/** When pending count exceeds this in-game, use the slightly looser catch-up time budget only. */
+const CHUNK_BACKLOG_CATCHUP_THRESHOLD = 88;
+
+function getChunkRenderRadius() {
+  return gameSettings.chunkRenderRadius;
+}
 
 /**
  * Keep GPU meshes only near the player (Minecraft-style streaming).
@@ -967,13 +964,13 @@ function syncVisibleChunks(force = false) {
   lastStreamChunkX = pcx;
   lastStreamChunkZ = pcz;
 
-  const R = CHUNK_RENDER_RADIUS + CHUNK_MESH_MARGIN;
-  const r2 = R * R;
+  const rMesh = getChunkRenderRadius() + CHUNK_MESH_MARGIN;
+  const r2Mesh = rMesh * rMesh;
 
   const want = new Set();
-  for (let dcx = -R; dcx <= R; dcx++) {
-    for (let dcz = -R; dcz <= R; dcz++) {
-      if (dcx * dcx + dcz * dcz > r2) continue;
+  for (let dcx = -rMesh; dcx <= rMesh; dcx++) {
+    for (let dcz = -rMesh; dcz <= rMesh; dcz++) {
+      if (dcx * dcx + dcz * dcz > r2Mesh) continue;
       const cx = pcx + dcx;
       const cz = pcz + dcz;
       want.add(`${cx},${cz}`);
@@ -1002,8 +999,8 @@ function updateChunkDrawVisibility() {
   const sig = `${pcx},${pcz},${chunkMeshes.size},${chunkVisibilityEpoch}`;
   if (sig === lastChunkVisSig) return;
   lastChunkVisSig = sig;
-  const R = CHUNK_RENDER_RADIUS;
-  const r2 = R * R;
+  const rDraw = getChunkRenderRadius();
+  const r2 = rDraw * rDraw;
   for (const [key, meshes] of chunkMeshes) {
     const comma = key.indexOf(',');
     const cx = Number(key.slice(0, comma));
@@ -1018,28 +1015,32 @@ function updateChunkDrawVisibility() {
 }
 
 /**
- * Builds up to `maxPerFrame` pending chunks, closest to the player first (linear pick).
- * Runs on the title screen too so terrain is mostly ready when the player clicks Play.
+ * Builds nearest pending chunks until a wall-time budget runs out (keeps frames fluid while moving).
+ * Sorts the queue once per call so we do not O(n) scan for every chunk.
  */
-function processChunkBuildQueue(maxPerFrame) {
+function processChunkBuildQueue(maxChunks, budgetMs) {
   if (chunkBuildPending.size === 0) return;
+  const t0 = performance.now();
+  const deadline = t0 + budgetMs;
   const pcx = Math.floor(player.x / CHUNK_XZ);
   const pcz = Math.floor(player.z / CHUNK_XZ);
+  const pendingArr = [...chunkBuildPending];
+  pendingArr.sort((ka, kb) => {
+    const ca = ka.indexOf(',');
+    const cb = kb.indexOf(',');
+    const ax = Number(ka.slice(0, ca));
+    const az = Number(ka.slice(ca + 1));
+    const bx = Number(kb.slice(0, cb));
+    const bz = Number(kb.slice(cb + 1));
+    const da = (ax - pcx) ** 2 + (az - pcz) ** 2;
+    const db = (bx - pcx) ** 2 + (bz - pcz) ** 2;
+    return da - db;
+  });
   let built = 0;
-  while (built < maxPerFrame && chunkBuildPending.size > 0) {
-    let bestKey = null;
-    let bestD = Infinity;
-    for (const key of chunkBuildPending) {
-      const comma = key.indexOf(',');
-      const ax = Number(key.slice(0, comma));
-      const az = Number(key.slice(comma + 1));
-      const d = (ax - pcx) ** 2 + (az - pcz) ** 2;
-      if (d < bestD) {
-        bestD = d;
-        bestKey = key;
-      }
-    }
-    if (!bestKey) break;
+  for (let i = 0; i < pendingArr.length; i++) {
+    if (built >= maxChunks || performance.now() >= deadline) break;
+    const bestKey = pendingArr[i];
+    if (!chunkBuildPending.has(bestKey)) continue;
     chunkBuildPending.delete(bestKey);
     if (chunkMeshes.has(bestKey)) continue;
     const comma = bestKey.indexOf(',');
@@ -1102,6 +1103,7 @@ function applyWorld(newWorld, mobData = 'spawn') {
   craftingTablePanelEl?.classList.add('hidden');
   craftingTablePanelEl?.setAttribute('aria-hidden', 'true');
   world = newWorld;
+  resetWeatherEventState(weatherEventState);
   if (seedInput instanceof HTMLInputElement) {
     seedInput.value = String(world.seed);
   }
@@ -1534,7 +1536,7 @@ function syncCamera(dtSec = 0) {
     if (walkBobEnvelope < 0.002) walkBobEnvelope = 0;
   }
 
-  if (walkBobEnvelope > 0.01 && cameraViewMode === 0) {
+  if (gameSettings.viewBobbing && walkBobEnvelope > 0.01 && cameraViewMode === 0) {
     const sprinting = canSprintNow() && player.onGround && !player.inWater;
     const freq = sprinting ? SPRINT_BOB_FREQ : WALK_BOB_FREQ;
     const ampMul = sprinting ? SPRINT_BOB_MUL : 1;
@@ -1560,7 +1562,7 @@ function syncCamera(dtSec = 0) {
   }
 
   const s = fallCameraShake;
-  if (s > 1e-6) {
+  if (gameSettings.cameraShake && s > 1e-6) {
     const t = clock.getElapsedTime();
     _shakeView.set(
       Math.sin(yaw) * Math.cos(pitch),
@@ -1655,6 +1657,9 @@ let weatherDisplay = {
   biome: 0,
 };
 
+/** Random ramp-in / hold / fade-out storms on top of {@link sampleWeather}. */
+const weatherEventState = createWeatherEventState();
+
 const _palNightSky = new THREE.Color().setHSL(0.62, 0.55, 0.075);
 const _palDaySky = new THREE.Color().setHSL(0.54, 0.42, 0.62);
 const _palSunset = new THREE.Color().setHSL(0.045, 0.78, 0.52);
@@ -1686,7 +1691,9 @@ function updateDayNight(dt) {
   const nightF = 1 - dayF;
   currentNightF = nightF;
 
-  const targetWx = sampleWeather(world, player.x, player.z, worldTimeTicks, dayF);
+  const baseWx = sampleWeather(world, player.x, player.z, worldTimeTicks, dayF);
+  tickWeatherEvents(weatherEventState, dt, baseWx.biome, dayF);
+  const targetWx = mergeWeatherEventBase(baseWx, weatherEventState, dayF);
   weatherDisplay = smoothWeatherSample(weatherDisplay, targetWx, dt);
 
   const sunsetT =
@@ -1748,8 +1755,9 @@ function updateDayNight(dt) {
   moon.intensity *= caveSunMoonMulSm;
   hemi.intensity *= caveHemiMulSm;
 
-  sun.castShadow = sunVis > 0.1;
-  moon.castShadow = moonVis > 0.08 && sunVis < 0.2;
+  const allowShadow = gameSettings.shadowsEnabled;
+  sun.castShadow = allowShadow && sunVis > 0.1;
+  moon.castShadow = allowShadow && moonVis > 0.08 && sunVis < 0.2;
 
   celestialSunVis = sunVis;
   celestialMoonVis = moonVis;
@@ -1780,13 +1788,19 @@ function updateSelection() {
   const { ox, oy, oz, dx, dy, dz } = getInteractionRayOriginAndDir();
   lastRay = raycastBlocks(world, ox, oy, oz, dx, dy, dz, REACH);
   if (lastRay) {
+    const { x, y, z } = lastRay.hit;
+    const id = world.get(x, y, z);
+    const key = `${x},${y},${z},${id}`;
+    if (key !== selectionOutlineKey) {
+      selectionOutlineKey = key;
+      const nextGeom = buildSelectionOutlineGeometry(world, x, y, z, id, atlasDrawSource);
+      selection.geometry.dispose();
+      selection.geometry = nextGeom;
+    }
     selection.visible = true;
-    selection.position.set(
-      lastRay.hit.x + 0.5,
-      lastRay.hit.y + 0.5,
-      lastRay.hit.z + 0.5,
-    );
+    selection.position.set(0, 0, 0);
   } else {
+    selectionOutlineKey = '';
     selection.visible = false;
   }
 }
@@ -1884,32 +1898,32 @@ function completeBlockBreak(x, y, z) {
     const t = world.get(x, y + 1, z);
     if (t === BlockId.DOOR_TOP || t === BlockId.DOOR_OPEN_TOP) {
       world.set(x, y + 1, z, 0);
-      addBlockBreakBurst(scene, x, y + 1, z, t);
+      if (gameSettings.blockBreakParticles) addBlockBreakBurst(scene, x, y + 1, z, t);
     }
   }
   if (blockId === BlockId.DOOR_TOP || blockId === BlockId.DOOR_OPEN_TOP) {
     const b = world.get(x, y - 1, z);
     if (b === BlockId.DOOR || b === BlockId.DOOR_OPEN) {
       world.set(x, y - 1, z, 0);
-      addBlockBreakBurst(scene, x, y - 1, z, b);
+      if (gameSettings.blockBreakParticles) addBlockBreakBurst(scene, x, y - 1, z, b);
     }
   }
   if (blockId === BlockId.TALL_GRASS_BOTTOM) {
     const t = world.get(x, y + 1, z);
     if (t === BlockId.TALL_GRASS_TOP) {
       world.set(x, y + 1, z, 0);
-      addBlockBreakBurst(scene, x, y + 1, z, t);
+      if (gameSettings.blockBreakParticles) addBlockBreakBurst(scene, x, y + 1, z, t);
     }
   }
   if (blockId === BlockId.TALL_GRASS_TOP) {
     const b = world.get(x, y - 1, z);
     if (b === BlockId.TALL_GRASS_BOTTOM) {
       world.set(x, y - 1, z, 0);
-      addBlockBreakBurst(scene, x, y - 1, z, b);
+      if (gameSettings.blockBreakParticles) addBlockBreakBurst(scene, x, y - 1, z, b);
     }
   }
   world.set(x, y, z, 0);
-  addBlockBreakBurst(scene, x, y, z, blockId);
+  if (gameSettings.blockBreakParticles) addBlockBreakBurst(scene, x, y, z, blockId);
   const rebuildCols = new Set([`${x},${z}`]);
   if (needsWaterRecomputeAfterBreak(world, x, y, z, wasWater)) {
     for (const c of recomputeWaterAround(world, x, y, z)) {
@@ -1922,8 +1936,25 @@ function completeBlockBreak(x, y, z) {
   }
   if (gameMode === 'survival') {
     const drop = getBlockDrop(blockId);
-    if (canPickupBlock(drop.blockId)) {
-      addItemToInventory(invSlots, drop.blockId, drop.count);
+    if (drop.count > 0 && canPickupBlock(drop.blockId)) {
+      let left = addItemToInventory(invSlots, drop.blockId, drop.count, { hotbarOnly: true });
+      if (left > 0) {
+        left = addItemToInventory(invSlots, drop.blockId, left, { backpackOnly: true });
+      }
+      if (left > 0) {
+        const spread = 0.1;
+        const gd = createGroundDrop(
+          x + 0.5 + (Math.random() - 0.5) * spread,
+          y + 0.14,
+          z + 0.5 + (Math.random() - 0.5) * spread,
+          drop.blockId,
+          left,
+          atlasTex,
+          world
+        );
+        scene.add(gd.mesh);
+        drops.push(gd);
+      }
     }
     damageHeldToolForMining();
   }
@@ -3077,6 +3108,18 @@ function refreshInventoryUI() {
 
 refreshInventoryUI();
 
+function buildPlayerSaveSnapshot() {
+  return {
+    gameMode,
+    player: { x: player.x, y: player.y, z: player.z },
+    worldTimeTicks,
+    playerVitals:
+      gameMode === 'survival'
+        ? { health: playerHealth, stamina: playerStamina, hunger: playerHunger }
+        : undefined,
+  };
+}
+
 function doSave() {
   try {
     saveToLocalStorage(
@@ -3085,6 +3128,7 @@ function doSave() {
       serializeMobsState(pigs, cows, squids, drops, zombies),
       armorSlots,
       serializeFurnaceStatesForSave(),
+      buildPlayerSaveSnapshot(),
     );
     showToast('World saved');
   } catch (err) {
@@ -3103,6 +3147,7 @@ function doLoad() {
     showToast('Save incompatible (world height changed)');
     return;
   }
+  hideDeathScreen();
   const mobArg = state.mobs !== undefined ? state.mobs : 'spawn';
   applyWorld(w, mobArg);
   furnaceStates.clear();
@@ -3115,9 +3160,37 @@ function doLoad() {
       smeltProgress: row.smeltProgress,
     });
   }
+  if (state.gameMode === 'creative' || state.gameMode === 'survival') {
+    setGameMode(state.gameMode);
+  }
   invSlots = inventory;
   armorSlots = state.armor ?? createArmorSlots();
   if (gameMode === 'creative') clearBackpackSlots(invSlots);
+
+  if (state.player) {
+    player.x = state.player.x;
+    player.y = state.player.y;
+    player.z = state.player.z;
+  }
+  if (typeof state.worldTimeTicks === 'number' && Number.isFinite(state.worldTimeTicks)) {
+    const mc = MC_DAY_TICKS;
+    worldTimeTicks = ((Math.floor(state.worldTimeTicks) % mc) + mc) % mc;
+  }
+  if (state.playerVitals && gameMode === 'survival') {
+    playerHealth = Math.max(0, Math.min(MAX_HEALTH, state.playerVitals.health));
+    playerStamina = Math.max(0, Math.min(MAX_STAMINA, state.playerVitals.stamina));
+    playerHunger = Math.max(0, Math.min(MAX_HUNGER, state.playerVitals.hunger));
+  }
+
+  cursorItem = { blockId: 0, count: 0 };
+  updateCursorItemDisplay();
+
+  lastStreamChunkX = NaN;
+  lastStreamChunkZ = NaN;
+  syncVisibleChunks(true);
+  syncCamera();
+
+  syncModeButtons();
   syncStatBarsVisibility();
   refreshInventoryUI();
   if (pauseMenuEl && !pauseMenuEl.classList.contains('hidden')) {
@@ -3278,7 +3351,7 @@ window.addEventListener('keyup', (e) => {
 canvas.addEventListener(
   'wheel',
   (e) => {
-    if (!pointerLocked || invOpen || worldGuiOpen()) return;
+    if (!pointerLocked || invOpen || worldGuiOpen() || gameSettings.disableHotbarScroll) return;
     e.preventDefault();
     const dir = e.deltaY > 0 ? 1 : -1;
     hotbarIndex = ((hotbarIndex + dir) % 9 + 9) % 9;
@@ -3287,17 +3360,56 @@ canvas.addEventListener(
   { passive: false },
 );
 
+function applyRendererPixelRatioAndSize() {
+  const dprCap = 2;
+  const base = Math.min(window.devicePixelRatio || 1, dprCap);
+  const scale = Math.max(0.5, Math.min(1, gameSettings.renderScale));
+  renderer.setPixelRatio(Math.max(0.5, base * scale));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  resizeInvPlayerPreview();
+}
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  invPlayerPreview.resize();
+  applyRendererPixelRatioAndSize();
 });
+
+/** @returns {{ size: number, type: number }} */
+function getShadowPresetConfig() {
+  switch (gameSettings.shadowQuality) {
+    case 'fast':
+      return { size: 512, type: THREE.BasicShadowMap };
+    case 'balanced':
+      return { size: 1024, type: THREE.PCFShadowMap };
+    default:
+      return { size: 2048, type: THREE.PCFSoftShadowMap };
+  }
+}
+
+function applyShadowQualityFromSettings() {
+  if (!gameSettings.shadowsEnabled) {
+    renderer.shadowMap.enabled = false;
+    return;
+  }
+  const { size, type } = getShadowPresetConfig();
+  shadowMapResolution = size;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = type;
+  for (const light of [sun, moon]) {
+    light.shadow.map?.dispose();
+    light.shadow.map = null;
+    light.shadow.mapSize.set(size, size);
+  }
+}
 
 function applyGraphicsSettingsFromState() {
   camera.fov = gameSettings.fov;
   camera.updateProjectionMatrix();
   setMasterVolume(gameSettings.masterVolume);
+  applyShadowQualityFromSettings();
+  applyRendererPixelRatioAndSize();
+  cloudLayer.group.visible = gameSettings.showClouds;
 }
 
 const SETTINGS_UI_CLUSTERS = [
@@ -3308,6 +3420,24 @@ const SETTINGS_UI_CLUSTERS = [
     sensVal: 'settingsSensVal',
     vol: 'settingsVolume',
     volVal: 'settingsVolVal',
+    renderDist: 'settingsRenderDist',
+    renderDistVal: 'settingsRenderDistVal',
+    terrainSpeed: 'settingsTerrainSpeed',
+    terrainSpeedVal: 'settingsTerrainSpeedVal',
+    renderScale: 'settingsRenderScale',
+    renderScaleVal: 'settingsRenderScaleVal',
+    shadowQuality: 'settingsShadowQuality',
+    maxTorchLights: 'settingsMaxTorchLights',
+    invertMouseY: 'settingsInvertMouseY',
+    invertMouseX: 'settingsInvertMouseX',
+    showCoords: 'settingsShowCoords',
+    showFps: 'settingsShowFps',
+    disableHotbarScroll: 'settingsDisableHotbarScroll',
+    shadows: 'settingsShadows',
+    clouds: 'settingsClouds',
+    viewBob: 'settingsViewBob',
+    camShake: 'settingsCamShake',
+    blockParticles: 'settingsBlockParticles',
   },
   {
     fov: 'pauseSettingsFov',
@@ -3316,6 +3446,24 @@ const SETTINGS_UI_CLUSTERS = [
     sensVal: 'pauseSettingsSensVal',
     vol: 'pauseSettingsVolume',
     volVal: 'pauseSettingsVolVal',
+    renderDist: 'pauseSettingsRenderDist',
+    renderDistVal: 'pauseSettingsRenderDistVal',
+    terrainSpeed: 'pauseSettingsTerrainSpeed',
+    terrainSpeedVal: 'pauseSettingsTerrainSpeedVal',
+    renderScale: 'pauseSettingsRenderScale',
+    renderScaleVal: 'pauseSettingsRenderScaleVal',
+    shadowQuality: 'pauseSettingsShadowQuality',
+    maxTorchLights: 'pauseSettingsMaxTorchLights',
+    invertMouseY: 'pauseSettingsInvertMouseY',
+    invertMouseX: 'pauseSettingsInvertMouseX',
+    showCoords: 'pauseSettingsShowCoords',
+    showFps: 'pauseSettingsShowFps',
+    disableHotbarScroll: 'pauseSettingsDisableHotbarScroll',
+    shadows: 'pauseSettingsShadows',
+    clouds: 'pauseSettingsClouds',
+    viewBob: 'pauseSettingsViewBob',
+    camShake: 'pauseSettingsCamShake',
+    blockParticles: 'pauseSettingsBlockParticles',
   },
 ];
 
@@ -3324,9 +3472,11 @@ function syncSettingsUiFromState() {
     const fovEl = document.getElementById(ids.fov);
     const sensEl = document.getElementById(ids.sens);
     const volEl = document.getElementById(ids.vol);
+    const rdEl = document.getElementById(ids.renderDist);
     const fovOut = document.getElementById(ids.fovVal);
     const sensOut = document.getElementById(ids.sensVal);
     const volOut = document.getElementById(ids.volVal);
+    const rdOut = document.getElementById(ids.renderDistVal);
     if (fovEl instanceof HTMLInputElement) {
       fovEl.value = String(gameSettings.fov);
       if (fovOut) fovOut.textContent = String(gameSettings.fov);
@@ -3339,6 +3489,46 @@ function syncSettingsUiFromState() {
       volEl.value = String(gameSettings.masterVolume);
       if (volOut) volOut.textContent = `${Math.round(gameSettings.masterVolume * 100)}%`;
     }
+    if (rdEl instanceof HTMLInputElement) {
+      rdEl.value = String(gameSettings.chunkRenderRadius);
+      if (rdOut) rdOut.textContent = String(gameSettings.chunkRenderRadius);
+    }
+    const tsEl = document.getElementById(ids.terrainSpeed);
+    const tsOut = document.getElementById(ids.terrainSpeedVal);
+    if (tsEl instanceof HTMLInputElement) {
+      tsEl.value = String(gameSettings.terrainLoadSpeed);
+      if (tsOut) tsOut.textContent = `${Math.round(gameSettings.terrainLoadSpeed * 100)}%`;
+    }
+    const rsEl = document.getElementById(ids.renderScale);
+    const rsOut = document.getElementById(ids.renderScaleVal);
+    if (rsEl instanceof HTMLInputElement) {
+      rsEl.value = String(gameSettings.renderScale);
+      if (rsOut) rsOut.textContent = `${Math.round(gameSettings.renderScale * 100)}%`;
+    }
+    const sqEl = document.getElementById(ids.shadowQuality);
+    if (sqEl instanceof HTMLSelectElement) sqEl.value = gameSettings.shadowQuality;
+    const tlEl = document.getElementById(ids.maxTorchLights);
+    if (tlEl instanceof HTMLSelectElement) tlEl.value = String(gameSettings.maxTorchLights);
+    const invY = document.getElementById(ids.invertMouseY);
+    if (invY instanceof HTMLInputElement) invY.checked = gameSettings.invertMouseY;
+    const invX = document.getElementById(ids.invertMouseX);
+    if (invX instanceof HTMLInputElement) invX.checked = gameSettings.invertMouseX;
+    const sc = document.getElementById(ids.showCoords);
+    if (sc instanceof HTMLInputElement) sc.checked = gameSettings.showCoordinates;
+    const sf = document.getElementById(ids.showFps);
+    if (sf instanceof HTMLInputElement) sf.checked = gameSettings.showFps;
+    const dh = document.getElementById(ids.disableHotbarScroll);
+    if (dh instanceof HTMLInputElement) dh.checked = gameSettings.disableHotbarScroll;
+    const sh = document.getElementById(ids.shadows);
+    if (sh instanceof HTMLInputElement) sh.checked = gameSettings.shadowsEnabled;
+    const cl = document.getElementById(ids.clouds);
+    if (cl instanceof HTMLInputElement) cl.checked = gameSettings.showClouds;
+    const vb = document.getElementById(ids.viewBob);
+    if (vb instanceof HTMLInputElement) vb.checked = gameSettings.viewBobbing;
+    const cs = document.getElementById(ids.camShake);
+    if (cs instanceof HTMLInputElement) cs.checked = gameSettings.cameraShake;
+    const bp = document.getElementById(ids.blockParticles);
+    if (bp instanceof HTMLInputElement) bp.checked = gameSettings.blockBreakParticles;
   }
 }
 
@@ -3347,6 +3537,7 @@ function bindSettingsPanel() {
     const fovEl = document.getElementById(ids.fov);
     const sensEl = document.getElementById(ids.sens);
     const volEl = document.getElementById(ids.vol);
+    const rdEl = document.getElementById(ids.renderDist);
     if (fovEl instanceof HTMLInputElement) {
       fovEl.addEventListener('input', () => {
         const v = Number(fovEl.value);
@@ -3370,8 +3561,80 @@ function bindSettingsPanel() {
         setMasterVolume(gameSettings.masterVolume);
       });
     }
+    if (rdEl instanceof HTMLInputElement) {
+      rdEl.addEventListener('input', () => {
+        const v = Number(rdEl.value);
+        gameSettings = saveSettings({ chunkRenderRadius: v });
+        lastChunkVisSig = '';
+        lastStreamChunkX = NaN;
+        lastStreamChunkZ = NaN;
+        syncVisibleChunks(true);
+        syncSettingsUiFromState();
+      });
+    }
+    const tsEl = document.getElementById(ids.terrainSpeed);
+    if (tsEl instanceof HTMLInputElement) {
+      tsEl.addEventListener('input', () => {
+        const v = Number(tsEl.value);
+        gameSettings = saveSettings({ terrainLoadSpeed: v });
+        syncSettingsUiFromState();
+      });
+    }
+    const rsEl = document.getElementById(ids.renderScale);
+    if (rsEl instanceof HTMLInputElement) {
+      rsEl.addEventListener('input', () => {
+        const v = Number(rsEl.value);
+        gameSettings = saveSettings({ renderScale: v });
+        syncSettingsUiFromState();
+        applyGraphicsSettingsFromState();
+      });
+    }
+    const sqEl = document.getElementById(ids.shadowQuality);
+    if (sqEl instanceof HTMLSelectElement) {
+      sqEl.addEventListener('change', () => {
+        const v = sqEl.value;
+        if (v !== 'high' && v !== 'balanced' && v !== 'fast') return;
+        gameSettings = saveSettings({ shadowQuality: v });
+        syncSettingsUiFromState();
+        applyGraphicsSettingsFromState();
+      });
+    }
+    const tlEl = document.getElementById(ids.maxTorchLights);
+    if (tlEl instanceof HTMLSelectElement) {
+      tlEl.addEventListener('change', () => {
+        const v = Number(tlEl.value);
+        gameSettings = saveSettings({ maxTorchLights: v });
+        syncSettingsUiFromState();
+      });
+    }
+    /**
+     * @param {string} elId
+     * @param {'invertMouseY' | 'invertMouseX' | 'showCoordinates' | 'showFps' | 'disableHotbarScroll' | 'shadowsEnabled' | 'showClouds' | 'viewBobbing' | 'cameraShake' | 'blockBreakParticles'} key
+     */
+    const bindCheck = (elId, key) => {
+      const el = document.getElementById(elId);
+      if (!(el instanceof HTMLInputElement)) return;
+      el.addEventListener('change', () => {
+        gameSettings = saveSettings({ [key]: el.checked });
+        syncSettingsUiFromState();
+        if (key === 'shadowsEnabled' || key === 'showClouds') {
+          applyGraphicsSettingsFromState();
+        }
+      });
+    };
+    bindCheck(ids.invertMouseY, 'invertMouseY');
+    bindCheck(ids.invertMouseX, 'invertMouseX');
+    bindCheck(ids.showCoords, 'showCoordinates');
+    bindCheck(ids.showFps, 'showFps');
+    bindCheck(ids.disableHotbarScroll, 'disableHotbarScroll');
+    bindCheck(ids.shadows, 'shadowsEnabled');
+    bindCheck(ids.clouds, 'showClouds');
+    bindCheck(ids.viewBob, 'viewBobbing');
+    bindCheck(ids.camShake, 'cameraShake');
+    bindCheck(ids.blockParticles, 'blockBreakParticles');
   }
   syncSettingsUiFromState();
+  applyGraphicsSettingsFromState();
 }
 
 bindSettingsPanel();
@@ -3409,8 +3672,10 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 document.addEventListener('mousemove', (e) => {
   if (pointerLocked) {
     const sens = 0.0022 * gameSettings.mouseSens;
-    yaw -= e.movementX * sens;
-    pitch -= e.movementY * sens;
+    const xLookSign = gameSettings.invertMouseX ? -1 : 1;
+    yaw -= e.movementX * sens * xLookSign;
+    const yLookSign = gameSettings.invertMouseY ? -1 : 1;
+    pitch -= e.movementY * sens * yLookSign;
     const lim = Math.PI / 2 - 0.02;
     pitch = Math.max(-lim, Math.min(lim, pitch));
   }
@@ -3426,11 +3691,11 @@ function startPlay() {
   const seed = urlSeed !== null ? urlSeed : readSeedFromInput();
   if (urlSeed === null && seed !== world.seed) {
     applyWorld(new World(WORLD_H, seed));
-  }
-  if (gameMode === 'creative') {
-    invSlots = createCreativeInventory();
-  } else {
-    invSlots = createInventory();
+    if (gameMode === 'creative') {
+      invSlots = createCreativeInventory();
+    } else {
+      invSlots = createInventory();
+    }
   }
   syncStatBarsVisibility();
   refreshInventoryUI();
@@ -3532,7 +3797,9 @@ function disposeEngine() {
   disposeAllBlockParticles(scene);
   disposeAllChunks();
   scene.remove(sunSprite, moonSprite);
+  sunSpriteBundle.tex.dispose();
   sunSpriteBundle.mat.dispose();
+  moonSpriteBundle.tex.dispose();
   moonSpriteBundle.mat.dispose();
   scene.remove(cloudLayer.group);
   disposeCloudLayer(cloudLayer);
@@ -3553,7 +3820,7 @@ function disposeEngine() {
   worldMat.dispose();
   cutoutMat.dispose();
   waterMat.dispose();
-  selectionGeom.dispose();
+  selection.geometry.dispose();
   selectionMat.dispose();
   crackGeo.dispose();
   crackMat.dispose();
@@ -3563,6 +3830,8 @@ function disposeEngine() {
 }
 
 let rafId = 0;
+let fpsHudAccumDt = 0;
+let fpsHudFrames = 0;
 window.addEventListener('pagehide', () => {
   cancelAnimationFrame(rafId);
   disposeEngine();
@@ -3580,12 +3849,38 @@ function loop() {
   if (furnaceOpen) refreshFurnacePanel();
 
   const startHidden = startEl?.classList.contains('hidden');
-  if (coordsHudEl && (pointerLocked || invOpen) && startHidden && !worldGuiOpen()) {
+  const pauseOpen = !!(pauseMenuEl && !pauseMenuEl.classList.contains('hidden'));
+  const inGameHud = startHidden && !pauseOpen;
+  if (
+    coordsHudEl &&
+    gameSettings.showCoordinates &&
+    (pointerLocked || invOpen) &&
+    inGameHud &&
+    !worldGuiOpen()
+  ) {
     coordsHudEl.textContent = `${Math.floor(player.x)} / ${Math.floor(player.y)} / ${Math.floor(player.z)}`;
     coordsHudEl.setAttribute('aria-hidden', 'false');
   } else if (coordsHudEl) {
     coordsHudEl.textContent = '';
     coordsHudEl.setAttribute('aria-hidden', 'true');
+  }
+
+  if (fpsHudEl) {
+    if (gameSettings.showFps && inGameHud) {
+      fpsHudAccumDt += dt;
+      fpsHudFrames += 1;
+      if (fpsHudAccumDt >= 0.5) {
+        fpsHudEl.textContent = `${Math.round(fpsHudFrames / fpsHudAccumDt)} FPS`;
+        fpsHudEl.setAttribute('aria-hidden', 'false');
+        fpsHudAccumDt = 0;
+        fpsHudFrames = 0;
+      }
+    } else {
+      fpsHudEl.textContent = '';
+      fpsHudEl.setAttribute('aria-hidden', 'true');
+      fpsHudAccumDt = 0;
+      fpsHudFrames = 0;
+    }
   }
 
   if ((pointerLocked || invOpen) && !worldGuiOpen()) {
@@ -3685,13 +3980,23 @@ function loop() {
   const chunkMenuOrPause =
     !startEl?.classList.contains('hidden') ||
     !!(pauseMenuEl && !pauseMenuEl.classList.contains('hidden'));
-  const chunkBuildBudget = chunkMenuOrPause
-    ? MAX_CHUNK_BUILDS_PER_FRAME_MENU
-    : chunkBuildPending.size > CHUNK_BACKLOG_BOOST_THRESHOLD
-      ? MAX_CHUNK_BUILDS_PER_FRAME_BACKLOG
-      : MAX_CHUNK_BUILDS_PER_FRAME_PLAY;
   syncVisibleChunks();
-  processChunkBuildQueue(chunkBuildBudget);
+  const backlog = chunkBuildPending.size;
+  const catchingUp = !chunkMenuOrPause && backlog > CHUNK_BACKLOG_CATCHUP_THRESHOLD;
+  const loadMul = Math.max(0.5, Math.min(2, gameSettings.terrainLoadSpeed));
+  const chunkTimeBudgetMs =
+    (chunkMenuOrPause
+      ? CHUNK_BUILD_TIME_BUDGET_MS_MENU
+      : catchingUp
+        ? CHUNK_BUILD_TIME_BUDGET_MS_PLAY_CATCHUP
+        : CHUNK_BUILD_TIME_BUDGET_MS_PLAY) * loadMul;
+  const chunkMaxBuilds = Math.max(
+    1,
+    Math.round(
+      (chunkMenuOrPause ? CHUNK_BUILD_MAX_PER_FRAME_MENU : CHUNK_BUILD_MAX_PER_FRAME_PLAY) * loadMul,
+    ),
+  );
+  processChunkBuildQueue(chunkMaxBuilds, chunkTimeBudgetMs);
   updateChunkDrawVisibility();
 
   /** Title or pause menu open — skip mobs and mining to save CPU/GPU. */
@@ -3743,6 +4048,7 @@ function loop() {
         }
       }
     }
+    tickGroundDrops(world, drops, dt);
     orientDropsToCamera(drops, camera, clock.getElapsedTime());
     const pickedUp = tryPickupDrops(player, drops, invSlots, {
       hotbarOnly: gameMode === 'creative',
@@ -3792,7 +4098,7 @@ function loop() {
     }
   }
 
-  /** Never draw FP hand in the main pass — avoids duplicate hands if any mesh still matches camera layer 0. */
+  /** Hide FP hand from the main pass so it never writes depth into the world buffer. */
   const fpHandWasVisible = fpHand.visible;
   if (fpHandWasVisible) fpHand.visible = false;
 
@@ -3828,7 +4134,6 @@ function loop() {
 
   syncUnderwaterScreenEffect();
   const onMainMenu = !startEl?.classList.contains('hidden');
-  const pauseOpen = !!(pauseMenuEl && !pauseMenuEl.classList.contains('hidden'));
   const menuOrPause = onMainMenu || pauseOpen;
   let rainShelter = null;
   if (!menuOrPause) {
@@ -3847,8 +4152,8 @@ function loop() {
       menuOrPause ? null : { kind: weatherDisplay.kind, strength: weatherDisplay.strength },
     rainShelter,
   });
-  updateTorchLights(world, player, dt);
-  updateTorchEmbers(world, player, dt);
+  updateTorchLights(world, player, dt, gameSettings.maxTorchLights);
+  updateTorchEmbers(world, player, dt, gameSettings.maxTorchLights);
 }
 
 loop();

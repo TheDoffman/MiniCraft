@@ -1,10 +1,17 @@
 import * as THREE from 'three';
 import { raycastBlocks, isParticleOccluder } from './raycast.js';
 
-const COUNT = 2200;
+/** Fewer streaks + cheaper occlusion keeps weather from dominating the frame budget. */
+const COUNT = 1400;
 const BOX = 26;
 const BOX_Y_LO = -4;
 const BOX_Y_HI = 22;
+
+/**
+ * When `computeRainParticleExposure` (see `weatherSoundExposure.js`) is high, per-streak rays almost
+ * always miss — skip them (saves several raycasts × COUNT per frame during open-field rain).
+ */
+const RAIN_OPEN_SKIP_STREAK_OCCLUSION_EXPOSURE = 0.88;
 
 /** World-space half-thickness of each rain ribbon (quads, not GL_LINES). */
 const RAIN_RIBBON_HALF_W = 0.0075;
@@ -16,8 +23,8 @@ const HIDE_X = -1e7;
 const HIDE_Y = -1e7;
 const HIDE_Z = -1e7;
 
-/** Fractions along each rain segment (camera-ray test at each). Fills gaps between endpoints. */
-const RAIN_STREAK_U = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1];
+/** Fractions along each rain segment for occlusion (camera→sample rays). Fewer = faster. */
+const RAIN_STREAK_U = [0.2, 0.45, 0.7];
 
 /**
  * True if an occluding solid lies strictly between the eye and this world point
@@ -253,6 +260,8 @@ export function updateWeatherParticles(refs, dt, camera, kind, strength, timeSec
     const streak = 0.11 + strength * 0.07;
     const windFx = wind * 0.045;
     const hw = RAIN_RIBBON_HALF_W;
+    const useStreakOcclusion =
+      world != null && rainExposure < RAIN_OPEN_SKIP_STREAK_OCCLUSION_EXPOSURE;
     for (let i = 0; i < COUNT; i++) {
       const i3 = i * 3;
       const i12 = i * RAIN_FLOATS_PER_STREAK;
@@ -266,7 +275,8 @@ export function updateWeatherParticles(refs, dt, camera, kind, strength, timeSec
       const by = wy - streak;
       const bz = wz + windFx * 0.2;
       const hide =
-        world != null && isRainStreakOccluded(world, ox, oy, oz, ax, ay, az, bx, by, bz, wx, wy, wz);
+        useStreakOcclusion &&
+        isRainStreakOccluded(world, ox, oy, oz, ax, ay, az, bx, by, bz, wx, wy, wz);
       if (hide) {
         for (let k = 0; k < 4; k++) {
           const o = i12 + k * 3;

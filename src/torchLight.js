@@ -87,17 +87,19 @@ export function gatherNearbyTorches(world, player) {
 /**
  * @param {import('./world.js').World} world
  * @param {{ x: number, y: number, z: number }} player
+ * @param {number} [maxLights] cap active point lights (pool remains {@link MAX_LIGHTS}).
  */
-export function updateTorchLights(world, player, dt) {
+export function updateTorchLights(world, player, dt, maxLights = MAX_LIGHTS) {
   timer += dt;
   if (timer < UPDATE_INTERVAL) return;
   timer = 0;
 
   const torches = gatherNearbyTorches(world, player);
+  const cap = Math.max(1, Math.min(MAX_LIGHTS, Math.floor(maxLights)));
 
   for (let i = 0; i < MAX_LIGHTS; i++) {
     const light = pool[i];
-    if (i < torches.length) {
+    if (i < cap && i < torches.length) {
       const t = torches[i];
       const att = effectiveTorchAttach(world, t.x, t.y, t.z);
       const off = torchLightOffset(att);

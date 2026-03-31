@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 import { addItemToInventory } from './inventory.js';
-import { BLOCKS, ATLAS_COLS, ATLAS_TILES, BlockId } from './blocktypes.js';
+import { BLOCKS, BlockId } from './blocktypes.js';
 import { TorchAttach, torchSupportDeltaToAttach, isTorchSupportBlock } from './torchAttach.js';
+import { getHeldBlockGeometry } from './firstPersonHand.js';
+
+/** World scale for dropped item mesh (held FP geometry is ~0.2 units wide). */
+const DROP_MESH_SCALE = 1.55;
+/** Half-height of drop mesh in world units (held cube is ±0.1 before scale). */
+const DROP_HALF_H = DROP_MESH_SCALE * 0.1;
+const DROP_GRAVITY = 26;
+const DROP_MAX_FALL_SPEED = 14;
 
 const NEIGHBOR_DIRS = [
   [1, 0, 0],
@@ -80,6 +88,69 @@ export function findMeatDropPlacement(world, ox, oy, oz) {
   return best;
 }
 
+function blockSupportsDrop(id) {
+  if (id === 0) return false;
+  const d = BLOCKS[id];
+  return !!(d && d.solid && d.collision !== false);
+}
+
+/**
+ * World Y for drop center resting on the first solid-with-collision block under (ix, iz).
+ * Matches {@link import('./world.js').World#topSolidY} support rules (no water/glass floor).
+ */
+function dropRestCenterY(world, ix, iz, cy) {
+  if (!world.inBounds(ix, 0, iz)) return cy;
+  let b = Math.min(world.height - 1, Math.floor(cy - DROP_HALF_H - 1e-4));
+  for (; b >= 0; b--) {
+    if (!world.inBounds(ix, b, iz)) return DROP_HALF_H;
+    if (blockSupportsDrop(world.get(ix, b, iz))) {
+      return b + 1 + DROP_HALF_H;
+    }
+  }
+  return DROP_HALF_H;
+}
+
+function dropShouldFallWithGravity(d) {
+  const isMeat = d.blockId === BlockId.PORKCHOP || d.blockId === BlockId.BEEF;
+  if (!isMeat) return true;
+  const att = d.attach ?? TorchAttach.AUTO;
+  if (att === TorchAttach.CEILING) return false;
+  if (att >= TorchAttach.WALL_MX && att <= TorchAttach.WALL_PZ) return false;
+  return true;
+}
+
+/**
+ * Fall until the column below has solid support (same rules as {@link import('./world.js').World#topSolidY}).
+ * @param {import('./world.js').World} world
+ * @param {Array<{ x: number, y: number, z: number, mesh: THREE.Object3D, vy?: number, blockId: number, attach?: number }>} drops
+ * @param {number} dt
+ */
+export function tickGroundDrops(world, drops, dt) {
+  if (!world || drops.length === 0) return;
+  for (let i = 0; i < drops.length; i++) {
+    const d = drops[i];
+    if (!dropShouldFallWithGravity(d)) continue;
+    const ix = Math.floor(d.x);
+    const iz = Math.floor(d.z);
+    const targetY = dropRestCenterY(world, ix, iz, d.y);
+    if (d.y <= targetY + 1e-4) {
+      d.y = targetY;
+      d.vy = 0;
+      d.mesh.position.set(d.x, d.y, d.z);
+      continue;
+    }
+    let vy = d.vy ?? 0;
+    vy = Math.min(DROP_MAX_FALL_SPEED, vy + DROP_GRAVITY * dt);
+    d.vy = vy;
+    d.y -= vy * dt;
+    if (d.y < targetY) {
+      d.y = targetY;
+      d.vy = 0;
+    }
+    d.mesh.position.set(d.x, d.y, d.z);
+  }
+}
+
 function meatWallBaseYaw(attach) {
   switch (attach) {
     case TorchAttach.WALL_MX:
@@ -95,11 +166,12 @@ function meatWallBaseYaw(attach) {
   }
 }
 
-let _dropGeo = null;
 /** @type {Map<import('three').Texture, Map<number, THREE.MeshBasicMaterial>>} */
 const _dropMatsByAtlas = new Map();
 
 /**
+ * Unlit material using the full block atlas (geometry carries per-face UVs).
+ * Does not own `atlasTex` — do not dispose the texture from here.
  * @param {THREE.Texture} atlasTex
  * @param {number} blockId
  */
@@ -112,17 +184,14 @@ function getDropMaterialForBlock(atlasTex, blockId) {
   let m = byId.get(blockId);
   if (!m) {
     const def = BLOCKS[blockId];
-    const col = def?.top?.[0] ?? 13;
-    const row = def?.top?.[1] ?? 0;
-    const t = atlasTex.clone();
-    t.repeat.set(1 / ATLAS_COLS, 1 / ATLAS_TILES);
-    t.offset.set(col / ATLAS_COLS, row / ATLAS_TILES);
-    t.needsUpdate = true;
+    const cutout = !!def?.alpha;
+    const itemOrTool = !!(def && !def.solid && !cutout);
+    const blended = cutout || itemOrTool;
     m = new THREE.MeshBasicMaterial({
-      map: t,
-      transparent: true,
-      depthWrite: false,
-      alphaTest: 0.08,
+      map: atlasTex,
+      transparent: blended,
+      depthWrite: !blended,
+      alphaTest: blended ? 0.08 : 0,
       fog: false,
       toneMapped: false,
       side: THREE.DoubleSide,
@@ -158,16 +227,17 @@ export function createGroundDrop(x, worldY, z, blockId, count, atlasTex, world =
     }
   }
 
-  if (!_dropGeo) _dropGeo = new THREE.PlaneGeometry(0.34, 0.34);
+  const geom = getHeldBlockGeometry(blockId);
   const mat = getDropMaterialForBlock(atlasTex, blockId);
-  const planeA = new THREE.Mesh(_dropGeo, mat);
-  const planeB = new THREE.Mesh(_dropGeo, mat);
-  planeB.rotation.y = Math.PI / 2;
-  planeA.renderOrder = 4;
-  planeB.renderOrder = 4;
+  const itemMesh = new THREE.Mesh(geom, mat);
+  itemMesh.renderOrder = 4;
+  itemMesh.frustumCulled = false;
+  itemMesh.castShadow = false;
+  itemMesh.receiveShadow = false;
 
   const group = new THREE.Group();
-  group.add(planeA, planeB);
+  group.add(itemMesh);
+  group.scale.setScalar(DROP_MESH_SCALE);
   group.position.set(fx, fy, fz);
   group.renderOrder = 4;
   return {
@@ -179,11 +249,12 @@ export function createGroundDrop(x, worldY, z, blockId, count, atlasTex, world =
     mesh: group,
     spinPhase: Math.random() * Math.PI * 2,
     attach,
+    vy: 0,
   };
 }
 
 /**
- * Minecraft-style item: two vertical planes in a +, yaw toward camera + slow spin.
+ * Yaw dropped item toward camera + slow spin (same feel as old billboard drops).
  * @param {Array<{ mesh: THREE.Object3D, spinPhase?: number }>} drops
  * @param {THREE.Camera} camera
  * @param {number} [timeSec]
@@ -242,13 +313,8 @@ export function tryPickupDrops(player, drops, slots, opts) {
 export function disposeMobsSharedResources() {
   for (const byId of _dropMatsByAtlas.values()) {
     for (const m of byId.values()) {
-      m.map?.dispose();
       m.dispose();
     }
   }
   _dropMatsByAtlas.clear();
-  if (_dropGeo) {
-    _dropGeo.dispose();
-    _dropGeo = null;
-  }
 }

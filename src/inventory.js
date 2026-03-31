@@ -121,12 +121,17 @@ export function displayBlockName(blockId) {
  * @param {InvSlot[]} slots
  * @param {number} blockId
  * @param {number} count
- * @param {{ hotbarOnly?: boolean }} [opts] — if true, only slots HOTBAR_OFFSET..INV_SIZE-1 are used
+ * @param {{ hotbarOnly?: boolean, backpackOnly?: boolean }} [opts] — hotbarOnly = slots 27–35; backpackOnly = 0–26 (ignored if hotbarOnly)
  */
 export function addItemToInventory(slots, blockId, count, opts) {
   if (!canPickupBlock(blockId) || count <= 0) return count;
-  const lo = opts?.hotbarOnly ? HOTBAR_OFFSET : 0;
-  const hi = INV_SIZE;
+  let lo = 0;
+  let hi = INV_SIZE;
+  if (opts?.hotbarOnly) {
+    lo = HOTBAR_OFFSET;
+  } else if (opts?.backpackOnly) {
+    hi = HOTBAR_OFFSET;
+  }
   if (TOOL_INFO[blockId]) {
     let remaining = count;
     for (let k = 0; k < count; k++) {

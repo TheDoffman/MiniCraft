@@ -250,26 +250,38 @@ function drawGlass(ctx, tx, ty) {
   ctx.stroke();
 }
 
+/**
+ * Water tile: teal-cyan depth gradient, soft ripples, caustic-style highlights (16×16 MC palette).
+ */
 function drawWater(ctx, tx, ty) {
   paintTile16Mc(ctx, tx, ty, (i, j, ttx, tty) => {
-    const n = hash2(i + ttx * 79, j + tty * 83, 888);
-    const wave = Math.sin((i + j) * 0.55 + ttx + tty) * 0.5 + 0.5;
-    const r = 28 + Math.floor(n * 18 + wave * 12);
-    const g = 92 + Math.floor(n * 22 + wave * 16);
-    const b = 210 + Math.floor(hash2(i, j, 52) * 28);
-    const a = 0.48 + n * 0.16;
+    const n = hash2(i + ttx * 41, j + tty * 47, 901);
+    const n2 = hash2(i * 2 + 11, j * 2 + 13, 905);
+    const n3 = hash2(j, i + ttx, 906);
+    const depthGrad = (j / Math.max(1, G - 1)) * 0.42;
+    const hWave = Math.sin((i * 0.42 + j * 0.31 + tty * 0.08) * 1.05) * 0.5 + 0.5;
+    let r = Math.floor(28 + depthGrad * 22 + hWave * 14 + n * 9);
+    let g = Math.floor(108 + depthGrad * 28 + hWave * 22 + n2 * 15);
+    let b = Math.floor(205 + depthGrad * 18 + hWave * 16 + n3 * 11);
+    const caust = Math.sin((i + j) * 0.72 + (i - j) * 0.38 + ttx * 0.15) * 0.5 + 0.5;
+    if (caust > 0.8 && n > 0.52) {
+      r = Math.min(255, r + 22);
+      g = Math.min(255, g + 30);
+      b = Math.min(255, b + 20);
+    }
+    if (caust < 0.2 && n2 < 0.38) {
+      r = Math.floor(r * 0.7);
+      g = Math.floor(g * 0.76);
+      b = Math.floor(b * 0.84);
+    }
+    if (hash2(i, j, 907) > 0.93) {
+      r = Math.min(255, r + 30);
+      g = Math.min(255, g + 36);
+      b = 255;
+    }
+    const a = 0.55 + n * 0.09 + caust * 0.1;
     return `rgba(${r},${g},${b},${a})`;
   });
-  const ox = tx * TILE_PX;
-  const oy = ty * TILE_PX;
-  ctx.globalAlpha = 0.22;
-  ctx.strokeStyle = 'rgb(160,210,255)';
-  ctx.lineWidth = Math.max(1, CELL * 0.25);
-  ctx.beginPath();
-  ctx.moveTo(ox + 2 * CELL, oy + (G - 2) * CELL);
-  ctx.lineTo(ox + (G - 2) * CELL, oy + 2 * CELL);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
 }
 
 function drawBedrock(ctx, tx, ty) {

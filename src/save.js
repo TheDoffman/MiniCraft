@@ -62,8 +62,9 @@ function base64ToUint8(b64) {
  * @param {{ pigs: { x: number, y: number, z: number, hp: number }[], cows?: { x: number, y: number, z: number, hp: number }[], squids?: { x: number, y: number, z: number, hp: number }[], drops: { x: number, y: number, z: number, blockId: number, count: number }[] }} [mobs]
  * @param {import('./inventory.js').InvSlot[]} [armor]
  * @param {unknown} [furnaces] Serialized per-tile furnace rows `{ k, input, fuel, output, burnLeft, smeltProgress }`
+ * @param {null | { gameMode?: string, player?: { x: number, y: number, z: number }, worldTimeTicks?: number, playerVitals?: { health: number, stamina: number, hunger: number } }} [playerSnapshot]
  */
-export function serializeGame(world, inventory, mobs, armor, furnaces) {
+export function serializeGame(world, inventory, mobs, armor, furnaces, playerSnapshot = null) {
   const perChunk = CHUNK_XZ * world.height * CHUNK_XZ;
   /** @type {Record<string, string>} */
   const chunks = {};
@@ -93,7 +94,7 @@ export function serializeGame(world, inventory, mobs, armor, furnaces) {
       doorChunks[k] = uint8ToBase64(dm);
     }
   }
-  return JSON.stringify({
+  const payload = {
     v: 8,
     height: world.height,
     seed: world.seed,
@@ -112,7 +113,40 @@ export function serializeGame(world, inventory, mobs, armor, furnaces) {
     })),
     mobs: mobs ?? { pigs: [], cows: [], squids: [], drops: [] },
     furnaces: Array.isArray(furnaces) ? furnaces : [],
-  });
+  };
+  if (playerSnapshot && typeof playerSnapshot === 'object') {
+    if (playerSnapshot.gameMode === 'creative' || playerSnapshot.gameMode === 'survival') {
+      payload.gameMode = playerSnapshot.gameMode;
+    }
+    if (
+      playerSnapshot.player &&
+      typeof playerSnapshot.player.x === 'number' &&
+      typeof playerSnapshot.player.y === 'number' &&
+      typeof playerSnapshot.player.z === 'number'
+    ) {
+      payload.player = {
+        x: playerSnapshot.player.x,
+        y: playerSnapshot.player.y,
+        z: playerSnapshot.player.z,
+      };
+    }
+    if (typeof playerSnapshot.worldTimeTicks === 'number' && Number.isFinite(playerSnapshot.worldTimeTicks)) {
+      payload.worldTimeTicks = playerSnapshot.worldTimeTicks;
+    }
+    if (
+      playerSnapshot.playerVitals &&
+      typeof playerSnapshot.playerVitals.health === 'number' &&
+      typeof playerSnapshot.playerVitals.stamina === 'number' &&
+      typeof playerSnapshot.playerVitals.hunger === 'number'
+    ) {
+      payload.playerVitals = {
+        health: playerSnapshot.playerVitals.health,
+        stamina: playerSnapshot.playerVitals.stamina,
+        hunger: playerSnapshot.playerVitals.hunger,
+      };
+    }
+  }
+  return JSON.stringify(payload);
 }
 
 /**
@@ -157,10 +191,34 @@ export function deserializeGame(jsonStr) {
         cows: Array.isArray(o.mobs?.cows) ? o.mobs.cows : [],
         squids: Array.isArray(o.mobs?.squids) ? o.mobs.squids : [],
         drops: Array.isArray(o.mobs?.drops) ? o.mobs.drops : [],
+        zombies: Array.isArray(o.mobs?.zombies) ? o.mobs.zombies : [],
       };
       const armor = Array.isArray(o.armor) ? deserializeArmorSlots(o.armor) : createArmorSlots();
       const furnaces = o.v === 8 ? parseFurnaceStatesArray(o.furnaces) : [];
-      return { world, inventory, armor, mobs, furnaces };
+      const gameMode = o.gameMode === 'creative' || o.gameMode === 'survival' ? o.gameMode : undefined;
+      const player =
+        o.player &&
+        typeof o.player === 'object' &&
+        typeof o.player.x === 'number' &&
+        typeof o.player.y === 'number' &&
+        typeof o.player.z === 'number'
+          ? { x: o.player.x, y: o.player.y, z: o.player.z }
+          : undefined;
+      const worldTimeTicks =
+        typeof o.worldTimeTicks === 'number' && Number.isFinite(o.worldTimeTicks) ? o.worldTimeTicks : undefined;
+      const playerVitals =
+        o.playerVitals &&
+        typeof o.playerVitals === 'object' &&
+        typeof o.playerVitals.health === 'number' &&
+        typeof o.playerVitals.stamina === 'number' &&
+        typeof o.playerVitals.hunger === 'number'
+          ? {
+              health: o.playerVitals.health,
+              stamina: o.playerVitals.stamina,
+              hunger: o.playerVitals.hunger,
+            }
+          : undefined;
+      return { world, inventory, armor, mobs, furnaces, gameMode, player, worldTimeTicks, playerVitals };
     }
     if (o.v === 3 && o.inventory && Array.isArray(o.inventory) && o.data) {
       const data = base64ToUint8(o.data);
@@ -200,9 +258,10 @@ export function deserializeGame(jsonStr) {
  * @param {{ pigs: { x: number, y: number, z: number, hp: number }[], cows?: { x: number, y: number, z: number, hp: number }[], squids?: { x: number, y: number, z: number, hp: number }[], drops: { x: number, y: number, z: number, blockId: number, count: number }[] }} [mobs]
  * @param {import('./inventory.js').InvSlot[]} [armor]
  * @param {unknown} [furnaces]
+ * @param {null | { gameMode?: string, player?: { x: number, y: number, z: number }, worldTimeTicks?: number, playerVitals?: { health: number, stamina: number, hunger: number } }} [playerSnapshot]
  */
-export function saveToLocalStorage(world, inventory, mobs, armor, furnaces) {
-  localStorage.setItem(STORAGE_KEY, serializeGame(world, inventory, mobs, armor, furnaces));
+export function saveToLocalStorage(world, inventory, mobs, armor, furnaces, playerSnapshot = null) {
+  localStorage.setItem(STORAGE_KEY, serializeGame(world, inventory, mobs, armor, furnaces, playerSnapshot));
 }
 
 /**

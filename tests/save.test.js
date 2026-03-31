@@ -33,6 +33,23 @@ describe('save format', () => {
     expect(state.furnaces[0].smeltProgress).toBeCloseTo(1.5);
   });
 
+  it('v8 round-trips player snapshot fields', () => {
+    const world = new World(64, 99, { airOnly: true });
+    const mobs = { pigs: [], cows: [], squids: [], drops: [] };
+    const snap = {
+      gameMode: 'survival',
+      player: { x: 12.5, y: 84.2, z: -3.25 },
+      worldTimeTicks: 15000,
+      playerVitals: { health: 77, stamina: 40, hunger: 55 },
+    };
+    const json = serializeGame(world, createInventory(), mobs, createArmorSlots(), [], snap);
+    const state = deserializeGame(json);
+    expect(state?.gameMode).toBe('survival');
+    expect(state?.player).toEqual(snap.player);
+    expect(state?.worldTimeTicks).toBe(15000);
+    expect(state?.playerVitals).toEqual(snap.playerVitals);
+  });
+
   it('v8 ignores malformed furnace rows', () => {
     const world = new World(64, 1, { airOnly: true });
     const inv = createInventory();

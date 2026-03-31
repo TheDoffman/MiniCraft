@@ -131,6 +131,7 @@
         </div>
       </div>
       <div id="coordsHud" class="coords-hud" aria-hidden="true"></div>
+      <div id="fpsHud" class="coords-hud fps-hud" aria-hidden="true"></div>
       <div id="toastContainer" class="toast-container" aria-live="polite"></div>
       <div id="start">
         <canvas id="mainMenuTerrainCanvas" class="main-menu-terrain-canvas" aria-hidden="true"></canvas>
@@ -167,7 +168,76 @@
                 <span>Volume <span id="settingsVolVal" class="settings-val"></span></span>
                 <input type="range" id="settingsVolume" min="0" max="1" step="0.05" />
               </label>
+              <label class="settings-row">
+                <span>Render distance (chunks) <span id="settingsRenderDistVal" class="settings-val"></span></span>
+                <input type="range" id="settingsRenderDist" min="4" max="12" step="1" />
+              </label>
+              <label class="settings-row">
+                <span>Terrain load speed <span id="settingsTerrainSpeedVal" class="settings-val"></span></span>
+                <input type="range" id="settingsTerrainSpeed" min="0.5" max="2" step="0.05" />
+              </label>
+              <label class="settings-row">
+                <span>Render resolution <span id="settingsRenderScaleVal" class="settings-val"></span></span>
+                <input type="range" id="settingsRenderScale" min="0.5" max="1" step="0.05" />
+              </label>
+              <label class="settings-row">
+                <span>Shadow detail</span>
+                <select id="settingsShadowQuality" class="mc-body settings-select" aria-label="Shadow quality">
+                  <option value="high">High (2048 soft)</option>
+                  <option value="balanced">Balanced (1024)</option>
+                  <option value="fast">Fast (512 basic)</option>
+                </select>
+              </label>
+              <label class="settings-row">
+                <span>Torch lights (near you)</span>
+                <select id="settingsMaxTorchLights" class="mc-body settings-select" aria-label="Max torch lights">
+                  <option value="4">4</option>
+                  <option value="8">8</option>
+                  <option value="12">12</option>
+                  <option value="16">16</option>
+                </select>
+              </label>
             </div>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsInvertMouseY" />
+              <span>Invert mouse Y (flight-style look)</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsInvertMouseX" />
+              <span>Invert mouse X (swap strafe-turn)</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsShowCoords" />
+              <span>Show coordinates (XYZ) in-game</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsShowFps" />
+              <span>Show FPS counter</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsDisableHotbarScroll" />
+              <span>Disable mouse wheel hotbar switching</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsShadows" />
+              <span>Shadows (sun / moon)</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsClouds" />
+              <span>Cloud layer</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsViewBob" />
+              <span>View bobbing while walking</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsCamShake" />
+              <span>Fall damage camera shake</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsBlockParticles" />
+              <span>Block break particles</span>
+            </label>
             <label class="start-option start-option-settings mc-body">
               <input type="checkbox" id="leftHandedInput" />
               <span>Left-handed (first-person hand on the left)</span>
@@ -239,7 +309,76 @@
                 <span>Volume <span id="pauseSettingsVolVal" class="settings-val"></span></span>
                 <input type="range" id="pauseSettingsVolume" min="0" max="1" step="0.05" />
               </label>
+              <label class="settings-row">
+                <span>Render distance (chunks) <span id="pauseSettingsRenderDistVal" class="settings-val"></span></span>
+                <input type="range" id="pauseSettingsRenderDist" min="4" max="12" step="1" />
+              </label>
+              <label class="settings-row">
+                <span>Terrain load speed <span id="pauseSettingsTerrainSpeedVal" class="settings-val"></span></span>
+                <input type="range" id="pauseSettingsTerrainSpeed" min="0.5" max="2" step="0.05" />
+              </label>
+              <label class="settings-row">
+                <span>Render resolution <span id="pauseSettingsRenderScaleVal" class="settings-val"></span></span>
+                <input type="range" id="pauseSettingsRenderScale" min="0.5" max="1" step="0.05" />
+              </label>
+              <label class="settings-row">
+                <span>Shadow detail</span>
+                <select id="pauseSettingsShadowQuality" class="mc-body settings-select" aria-label="Shadow quality">
+                  <option value="high">High (2048 soft)</option>
+                  <option value="balanced">Balanced (1024)</option>
+                  <option value="fast">Fast (512 basic)</option>
+                </select>
+              </label>
+              <label class="settings-row">
+                <span>Torch lights (near you)</span>
+                <select id="pauseSettingsMaxTorchLights" class="mc-body settings-select" aria-label="Max torch lights">
+                  <option value="4">4</option>
+                  <option value="8">8</option>
+                  <option value="12">12</option>
+                  <option value="16">16</option>
+                </select>
+              </label>
             </div>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsInvertMouseY" />
+              <span>Invert mouse Y (flight-style look)</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsInvertMouseX" />
+              <span>Invert mouse X (swap strafe-turn)</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsShowCoords" />
+              <span>Show coordinates (XYZ) in-game</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsShowFps" />
+              <span>Show FPS counter</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsDisableHotbarScroll" />
+              <span>Disable mouse wheel hotbar switching</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsShadows" />
+              <span>Shadows (sun / moon)</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsClouds" />
+              <span>Cloud layer</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsViewBob" />
+              <span>View bobbing while walking</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsCamShake" />
+              <span>Fall damage camera shake</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsBlockParticles" />
+              <span>Block break particles</span>
+            </label>
             <label class="start-option start-option-settings mc-body">
               <input type="checkbox" id="pauseLeftHandedInput" />
               <span>Left-handed (first-person hand on the left)</span>

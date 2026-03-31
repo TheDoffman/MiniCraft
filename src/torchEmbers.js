@@ -88,11 +88,13 @@ export function initTorchEmbers(scene) {
  * @param {import('./world.js').World} world
  * @param {{ x: number, y: number, z: number }} player
  * @param {number} dt
+ * @param {number} [maxTorchCap] align ember sources with torch light budget.
  */
-export function updateTorchEmbers(world, player, dt) {
+export function updateTorchEmbers(world, player, dt, maxTorchCap = EMBER_TORCH_CAP) {
   if (!points) return;
 
-  const torches = gatherNearbyTorches(world, player).slice(0, EMBER_TORCH_CAP);
+  const cap = Math.min(EMBER_TORCH_CAP, Math.max(1, Math.floor(maxTorchCap)));
+  const torches = gatherNearbyTorches(world, player).slice(0, cap);
   const posAttr = points.geometry.getAttribute('position');
   const colAttr = points.geometry.getAttribute('color');
   const posArr = /** @type {Float32Array} */ (posAttr.array);
