@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniCraft</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Tiny5&family=VT323&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="ui">
+      <div id="underwaterOverlay" class="underwater-overlay" aria-hidden="true"></div>
+      <div id="crosshair"></div>
+      <div id="hudBottom">
+        <div id="statBars" aria-hidden="false">
+          <div class="stat-block stat-health">
+            <span class="stat-label">Health</span>
+            <div class="stat-track">
+              <div id="healthFill" class="stat-fill stat-fill-health"></div>
+            </div>
+          </div>
+          <div class="stat-block stat-stamina">
+            <span class="stat-label">Stamina</span>
+            <div class="stat-track">
+              <div id="staminaFill" class="stat-fill stat-fill-stamina"></div>
+            </div>
+          </div>
+          <div class="stat-block stat-hunger">
+            <span class="stat-label">Hunger</span>
+            <div class="stat-track">
+              <div id="hungerFill" class="stat-fill stat-fill-hunger"></div>
+            </div>
+          </div>
+        </div>
+        <div id="hotbar"></div>
+      </div>
+      <div id="inventoryPanel" class="hidden" aria-hidden="true">
+        <div class="inv-panel">
+          <div class="inv-title">Inventory</div>
+          <div class="inv-body">
+            <div class="inv-doll-area">
+              <div id="invArmorRail" class="inv-armor-rail" aria-label="Armor"></div>
+              <div class="inv-preview-column" aria-hidden="false">
+                <div class="inv-preview-label">Player</div>
+                <div id="invPlayerPreviewMount" class="inv-preview-viewport"></div>
+              </div>
+            </div>
+            <div id="invCraftArea" class="inv-craft-area">
+              <div class="craft-label">Crafting</div>
+              <div class="craft-row">
+                <div id="craftGrid" class="craft-grid"></div>
+                <div class="craft-arrow">→</div>
+                <div id="craftResult" class="craft-result"></div>
+              </div>
+            </div>
+            <div class="inv-grid-wrap">
+              <div id="invBackpackSection" class="inv-backpack-section">
+                <div class="inv-section-label">Storage</div>
+                <div id="invGridBackpack" class="inv-grid inv-grid-backpack" aria-label="Storage"></div>
+              </div>
+              <div id="creativeCatalogSection" class="creative-catalog-section hidden" aria-hidden="true">
+                <div class="creative-catalog-head">
+                  <span class="creative-catalog-title">Creative</span>
+                  <input
+                    type="search"
+                    id="creativeSearch"
+                    class="creative-search"
+                    placeholder="Search items…"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <div id="creativeCatalogGrid" class="creative-catalog-grid" aria-label="All blocks and items"></div>
+              </div>
+              <div class="inv-hotbar-panel-block">
+                <div class="inv-section-label">Hotbar</div>
+                <div id="invGridHotbar" class="inv-grid inv-grid-hotbar-panel" aria-label="Hotbar"></div>
+              </div>
+            </div>
+          </div>
+          <p class="inv-hint">Press <kbd>E</kbd> or <kbd>Esc</kbd> to close</p>
+        </div>
+      </div>
+      <div id="furnacePanel" class="hidden furnace-panel" aria-hidden="true">
+        <div class="inv-panel">
+          <div class="inv-title">Furnace</div>
+          <div class="furnace-body">
+            <div class="furnace-slots">
+              <div class="furnace-label">Input</div>
+              <div id="furnaceInput" class="slot furnace-slot"></div>
+              <div class="furnace-label">Fuel</div>
+              <div id="furnaceFuel" class="slot furnace-slot"></div>
+              <div class="craft-arrow" id="furnaceArrow">→</div>
+              <div class="furnace-label">Output</div>
+              <div id="furnaceOutput" class="slot furnace-slot"></div>
+            </div>
+            <div id="furnaceProgress" class="furnace-progress">
+              <div id="furnaceProgressFill" class="furnace-progress-fill"></div>
+            </div>
+          </div>
+          <p class="inv-hint">Press <kbd>E</kbd> or <kbd>Esc</kbd> to close</p>
+        </div>
+      </div>
+      <div id="craftingTablePanel" class="hidden crafting-table-panel" aria-hidden="true">
+        <div class="inv-panel">
+          <div class="inv-title">Crafting</div>
+          <div class="crafting-table-body">
+            <div class="craft-table-craft-row">
+              <div id="craftTableGrid" class="craft-grid craft-grid-3x3" aria-label="Crafting grid"></div>
+              <div class="craft-arrow">→</div>
+              <div id="craftTableResult" class="craft-result" aria-label="Crafting output"></div>
+            </div>
+            <div class="inv-section-label">Storage</div>
+            <div id="craftTableInvBackpack" class="inv-grid inv-grid-backpack" aria-label="Storage"></div>
+            <div class="inv-section-label">Hotbar</div>
+            <div id="craftTableInvHotbar" class="inv-grid inv-grid-hotbar-panel" aria-label="Hotbar"></div>
+          </div>
+          <p class="inv-hint">Press <kbd>E</kbd> or <kbd>Esc</kbd> to close</p>
+        </div>
+      </div>
+      <div id="deathScreen" class="death-screen hidden" aria-hidden="true">
+        <div class="death-inner">
+          <h2 class="death-title">You Died!</h2>
+          <p class="death-sub" id="deathReason">Fell from a high place</p>
+          <button type="button" id="respawnBtn" class="mc-btn mc-btn-primary">Respawn</button>
+        </div>
+      </div>
+      <div id="coordsHud" class="coords-hud" aria-hidden="true"></div>
+      <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+      <div id="start">
+        <canvas id="mainMenuTerrainCanvas" class="main-menu-terrain-canvas" aria-hidden="true"></canvas>
+        <div class="mc-menu-vignette" aria-hidden="true"></div>
+        <div class="mc-menu-inner main-menu-card">
+          <div class="mc-title-row">
+            <h1 class="mc-title">MiniCraft</h1>
+            <p class="mc-splash" id="menuSplash">Now with cubes!</p>
+          </div>
+          <p class="start-sub mc-body"><code>?seed=12345</code> in the URL fixes the world seed.</p>
+          <label class="seed-row mc-body">
+            <span class="seed-label">Seed</span>
+            <input type="text" id="seedInput" inputmode="numeric" autocomplete="off" placeholder="random" />
+          </label>
+          <div class="mode-selector mc-body">
+            <span class="mode-label">Mode</span>
+            <div class="mode-btns">
+              <button type="button" id="modeSurvivalBtn" class="mc-btn mc-btn-mode active">Survival</button>
+              <button type="button" id="modeCreativeBtn" class="mc-btn mc-btn-mode">Creative</button>
+            </div>
+          </div>
+          <details class="settings-panel mc-body">
+            <summary class="settings-summary">Settings</summary>
+            <div class="settings-rows">
+              <label class="settings-row">
+                <span>Field of view <span id="settingsFovVal" class="settings-val"></span></span>
+                <input type="range" id="settingsFov" min="55" max="100" step="1" />
+              </label>
+              <label class="settings-row">
+                <span>Mouse sensitivity <span id="settingsSensVal" class="settings-val"></span></span>
+                <input type="range" id="settingsMouseSens" min="0.25" max="2.5" step="0.05" />
+              </label>
+              <label class="settings-row">
+                <span>Volume <span id="settingsVolVal" class="settings-val"></span></span>
+                <input type="range" id="settingsVolume" min="0" max="1" step="0.05" />
+              </label>
+            </div>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="leftHandedInput" />
+              <span>Left-handed (first-person hand on the left)</span>
+            </label>
+            <details class="controls-hint">
+              <summary>Controls</summary>
+              <ul class="controls-list">
+                <li><kbd>WASD</kbd> move · double-tap <kbd>W</kbd> + hold sprint</li>
+                <li><kbd>Space</kbd> jump · <kbd>Shift</kbd> swim down in water</li>
+                <li>
+                  <kbd>1–9</kbd> hotbar · <kbd>E</kbd> inventory + 2×2 craft · <kbd>Esc</kbd> also closes
+                  panels
+                </li>
+                <li>
+                  Left-click break · right-click place · look at furnace, crafting table, or door to
+                  use
+                </li>
+                <li>
+                  Crafting table: 4 planks (2×2) → table; 3×3 on the table · <kbd>E</kbd> or
+                  <kbd>Esc</kbd> closes
+                </li>
+                <li>
+                  <kbd>F5</kbd> camera · <kbd>Shift</kbd>+<kbd>S</kbd> save · <kbd>Shift</kbd>+<kbd>L</kbd> load
+                  (furnace contents saved)
+                </li>
+                <li>Death screen: <kbd>Enter</kbd> or <kbd>Space</kbd> respawn</li>
+              </ul>
+            </details>
+          </details>
+          <div class="start-actions">
+            <button type="button" id="playBtn" class="mc-btn mc-btn-primary">Play</button>
+            <button type="button" id="newWorldBtn" class="mc-btn mc-btn-secondary">New world</button>
+          </div>
+          <div class="start-actions">
+            <button type="button" id="loadBtn" class="mc-btn mc-btn-secondary">Load</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="pauseMenu" class="pause-menu hidden" aria-hidden="true">
+        <div class="pause-menu-backdrop" aria-hidden="true"></div>
+        <div class="pause-menu-dirt mc-menu-dirt-bg" aria-hidden="true"></div>
+        <div class="main-menu-skyband" aria-hidden="true"></div>
+        <div class="mc-menu-vignette" aria-hidden="true"></div>
+        <div class="main-menu-grass-edge" aria-hidden="true"></div>
+        <div
+          class="mc-menu-inner main-menu-card pause-menu-inner"
+          role="dialog"
+          aria-labelledby="pauseMenuTitle"
+          aria-modal="true"
+        >
+          <div class="mc-title-row">
+            <h2 id="pauseMenuTitle" class="mc-title">Paused</h2>
+            <p class="mc-splash pause-menu-splash">BRB</p>
+          </div>
+          <p class="start-sub mc-body" id="pauseWorldMeta"></p>
+          <details class="settings-panel mc-body">
+            <summary class="settings-summary">Settings</summary>
+            <div class="settings-rows">
+              <label class="settings-row">
+                <span>Field of view <span id="pauseSettingsFovVal" class="settings-val"></span></span>
+                <input type="range" id="pauseSettingsFov" min="55" max="100" step="1" />
+              </label>
+              <label class="settings-row">
+                <span>Mouse sensitivity <span id="pauseSettingsSensVal" class="settings-val"></span></span>
+                <input type="range" id="pauseSettingsMouseSens" min="0.25" max="2.5" step="0.05" />
+              </label>
+              <label class="settings-row">
+                <span>Volume <span id="pauseSettingsVolVal" class="settings-val"></span></span>
+                <input type="range" id="pauseSettingsVolume" min="0" max="1" step="0.05" />
+              </label>
+            </div>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseLeftHandedInput" />
+              <span>Left-handed (first-person hand on the left)</span>
+            </label>
+            <details class="controls-hint">
+              <summary>Controls</summary>
+              <ul class="controls-list">
+                <li><kbd>WASD</kbd> move · double-tap <kbd>W</kbd> + hold sprint</li>
+                <li><kbd>Space</kbd> jump · <kbd>Shift</kbd> swim down in water</li>
+                <li>
+                  <kbd>1–9</kbd> hotbar · <kbd>E</kbd> inventory + 2×2 craft · <kbd>Esc</kbd> also closes
+                  panels
+                </li>
+                <li>
+                  Left-click break · right-click place · look at furnace, crafting table, or door to
+                  use
+                </li>
+                <li>
+                  Crafting table: 4 planks (2×2) → table; 3×3 on the table · <kbd>E</kbd> or
+                  <kbd>Esc</kbd> closes
+                </li>
+                <li>
+                  <kbd>F5</kbd> camera · <kbd>Shift</kbd>+<kbd>S</kbd> save · <kbd>Shift</kbd>+<kbd>L</kbd> load
+                  (furnace contents saved)
+                </li>
+                <li>Death screen: <kbd>Enter</kbd> or <kbd>Space</kbd> respawn</li>
+              </ul>
+            </details>
+          </details>
+          <div class="start-actions">
+            <button type="button" id="pauseResumeBtn" class="mc-btn mc-btn-primary">Resume</button>
+          </div>
+          <div class="start-actions">
+            <button type="button" id="pauseSaveBtn" class="mc-btn mc-btn-secondary">Save</button>
+            <button type="button" id="pauseLoadBtn" class="mc-btn mc-btn-secondary">Load</button>
+          </div>
+          <div class="start-actions">
+            <button type="button" id="pauseMainMenuBtn" class="mc-btn mc-btn-secondary">
+              Main menu
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <canvas id="c"></canvas>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

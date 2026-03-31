@@ -1,0 +1,22 @@
+{
+  "name": "minicraft",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:textures": "node scripts/generate-textures.mjs",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0",
+    "vite": "^5.4.11",
+    "vitest": "^3.0.0"
+  }
+}
