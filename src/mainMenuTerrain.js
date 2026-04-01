@@ -21,11 +21,13 @@ const TITLE_BACKDROP_SEED = 5;
  * @param {THREE.Material} o.worldMatTemplate
  * @param {THREE.Material} o.cutoutMatTemplate
  * @param {THREE.Material} o.waterMatTemplate
+ * @param {THREE.Material} [o.lavaMatTemplate]
  */
 export function initMainMenuTerrain(o) {
   const menuWorldMat = o.worldMatTemplate.clone();
   const menuCutoutMat = o.cutoutMatTemplate.clone();
   const menuWaterMat = o.waterMatTemplate.clone();
+  const menuLavaMat = o.lavaMatTemplate?.clone() ?? o.waterMatTemplate.clone();
 
   /** Chunk radius from origin (inclusive): (2*R+1)² chunks — larger patch hides streaming edges. */
   const R = 3;
@@ -133,7 +135,7 @@ export function initMainMenuTerrain(o) {
     for (let cz = -R; cz <= R; cz++) {
       for (let cx = -R; cx <= R; cx++) {
         const reg = regionForChunk(cx, cz);
-        const { opaque, cutout, water } = buildRegionMesh(
+        const { opaque, cutout, water, lava } = buildRegionMesh(
           w,
           reg.x0,
           reg.x1,
@@ -152,7 +154,11 @@ export function initMainMenuTerrain(o) {
         mw.castShadow = false;
         mw.receiveShadow = false;
         mw.renderOrder = 1 + tieBreak + 0.02;
-        terrainGroup.add(mo, mc, mw);
+        const ml = new THREE.Mesh(lava, menuLavaMat);
+        ml.castShadow = false;
+        ml.receiveShadow = false;
+        ml.renderOrder = 1 + tieBreak + 0.035;
+        terrainGroup.add(mo, mc, mw, ml);
       }
     }
   }
@@ -214,9 +220,11 @@ export function initMainMenuTerrain(o) {
       menuWorldMat.map = tex;
       menuCutoutMat.map = tex;
       menuWaterMat.map = tex;
+      menuLavaMat.map = tex;
       menuWorldMat.needsUpdate = true;
       menuCutoutMat.needsUpdate = true;
       menuWaterMat.needsUpdate = true;
+      menuLavaMat.needsUpdate = true;
     },
     dispose() {
       cancelAnimationFrame(rafId);
@@ -230,6 +238,7 @@ export function initMainMenuTerrain(o) {
       menuWorldMat.dispose();
       menuCutoutMat.dispose();
       menuWaterMat.dispose();
+      menuLavaMat.dispose();
       renderer.dispose();
     },
   };

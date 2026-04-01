@@ -280,9 +280,28 @@ export function orientDropsToCamera(drops, camera, timeSec = 0) {
 }
 
 /**
+ * Hotbar first, then backpack (same as block-break rewards). Creative passes `{ hotbarOnly: true }`.
+ * @param {import('./inventory.js').InvSlot[]} slots
+ * @param {number} blockId
+ * @param {number} count
+ * @param {{ hotbarOnly?: boolean, backpackOnly?: boolean }} [opts]
+ * @returns {number} count that could not be added
+ */
+function addPickupToInventory(slots, blockId, count, opts) {
+  if (opts?.hotbarOnly || opts?.backpackOnly) {
+    return addItemToInventory(slots, blockId, count, opts);
+  }
+  let left = addItemToInventory(slots, blockId, count, { hotbarOnly: true });
+  if (left > 0) {
+    left = addItemToInventory(slots, blockId, left, { backpackOnly: true });
+  }
+  return left;
+}
+
+/**
  * @param {import('./player.js').Player} player
  * @param {import('./inventory.js').InvSlot[]} slots
- * @param {{ hotbarOnly?: boolean }} [opts]
+ * @param {{ hotbarOnly?: boolean, backpackOnly?: boolean }} [opts]
  * @returns {Array<{ mesh: THREE.Mesh }>}
  */
 export function tryPickupDrops(player, drops, slots, opts) {
@@ -302,9 +321,13 @@ export function tryPickupDrops(player, drops, slots, opts) {
       max[1] > y - padY &&
       min[1] < y + padY + 0.5
     ) {
-      addItemToInventory(slots, d.blockId, d.count, opts);
-      drops.splice(i, 1);
-      removed.push(d);
+      const remaining = addPickupToInventory(slots, d.blockId, d.count, opts);
+      if (remaining === 0) {
+        drops.splice(i, 1);
+        removed.push(d);
+      } else {
+        d.count = remaining;
+      }
     }
   }
   return removed;

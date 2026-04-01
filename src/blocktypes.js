@@ -572,6 +572,18 @@ export const BLOCKS = [
     toolType: 'axe',
     interactable: true,
   },
+  {
+    name: 'lava',
+    solid: true,
+    collision: false,
+    top: [13, 3],
+    bottom: [13, 3],
+    side: [13, 3],
+    alpha: true,
+    fluid: true,
+    indestructible: true,
+    creativeSkip: true,
+  },
 ];
 
 export const BlockId = {
@@ -634,6 +646,7 @@ export const BlockId = {
   TALL_GRASS_TOP: 56,
   SHORT_GRASS: 57,
   CRAFTING_TABLE: 58,
+  LAVA: 59,
 };
 
 /** @param {number} id */
@@ -767,6 +780,7 @@ export function getBlockDrop(blockId) {
   ) {
     return { blockId: 0, count: 0 };
   }
+  if (blockId === BlockId.LAVA) return { blockId: 0, count: 0 };
   return { blockId, count: 1 };
 }
 

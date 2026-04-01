@@ -1,4 +1,5 @@
-import { collidesAABB, aabbOverlapsFluid } from './physics.js';
+import { collidesAABB, aabbOverlapsFluid, aabbOverlapsBlockId } from './physics.js';
+import { BlockId } from './blocktypes.js';
 
 const GRAVITY = -34;
 const JUMP = 9.2;
@@ -34,8 +35,10 @@ export class Player {
     this.vy = 0;
     this.vz = 0;
     this.onGround = false;
-    /** True when body AABB overlaps water. */
+    /** True when body AABB overlaps water (not lava). */
     this.inWater = false;
+    /** True when body AABB overlaps lava. */
+    this.inLava = false;
     this.fellInVoid = false;
     this.eyeHeight = 1.62;
     this.halfW = 0.28;
@@ -112,8 +115,12 @@ export class Player {
     this.fallDamageThisFrame = 0;
 
     const { min, max } = this.aabb();
-    const inWater = aabbOverlapsFluid(world, min, max);
-    this.inWater = inWater;
+    const inLava = aabbOverlapsBlockId(world, min, max, BlockId.LAVA);
+    const inWaterFluid =
+      aabbOverlapsFluid(world, min, max) && !inLava;
+    this.inLava = inLava;
+    this.inWater = inWaterFluid;
+    const inWater = inWaterFluid;
 
     if (wasOnGround) {
       this._maxFallSpeed = 0;
@@ -145,7 +152,27 @@ export class Player {
       iz /= ilen;
     }
 
-    if (inWater) {
+    if (inLava) {
+      const swimSprint = !!input.sprint && ilen > 1e-6;
+      const speed = LAVA_MOVE * (swimSprint ? 1.12 : 1);
+      const targetVx = ix * speed;
+      const targetVz = iz * speed;
+      const damp = Math.exp(-LAVA_DRAG * dt);
+      this.vx = this.vx * damp + targetVx * (1 - damp);
+      this.vz = this.vz * damp + targetVz * (1 - damp);
+
+      this.vy += LAVA_GRAVITY * dt;
+      if (input.jump) {
+        this.vy += SWIM_UP_ACCEL * 0.45 * dt;
+      }
+      if (input.swimDown) {
+        this.vy -= SWIM_DOWN_ACCEL * 0.55 * dt;
+      }
+      if (!input.jump && !input.swimDown) {
+        this.vy += LAVA_BUOY * dt;
+      }
+      this.vy = Math.max(LAVA_VY_MIN, Math.min(LAVA_VY_MAX, this.vy));
+    } else if (inWater) {
       const swimSprint = !!input.sprint && ilen > 1e-6;
       const speed = WATER_MOVE * (swimSprint ? WATER_SPRINT_MUL : 1);
       const targetVx = ix * speed;
@@ -188,14 +215,14 @@ export class Player {
     }
 
     this.tryMove(world, dt, this.vx * dt, 0, 0);
-    if (!inWater && this.vy < 0) {
+    if (!inWater && !inLava && this.vy < 0) {
       this._maxFallSpeed = Math.max(this._maxFallSpeed, -this.vy);
     }
     this.tryMove(world, dt, 0, this.vy * dt, 0);
     this.tryMove(world, dt, 0, 0, this.vz * dt);
 
-    if (inWater && input.jump && wasOnGround) {
-      this.vy = Math.max(this.vy, WATER_JUMP_OFF_FLOOR);
+    if ((inWater || inLava) && input.jump && wasOnGround) {
+      this.vy = Math.max(this.vy, inLava ? WATER_JUMP_OFF_FLOOR * 0.55 : WATER_JUMP_OFF_FLOOR);
     }
 
     if (!this.onGround) {
@@ -208,8 +235,8 @@ export class Player {
       );
     }
 
-    if (this.onGround && !inWater) this.vy = 0;
-    else if (this.onGround && inWater) this.vy = Math.min(0, this.vy);
+    if (this.onGround && !inWater && !inLava) this.vy = 0;
+    else if (this.onGround && (inWater || inLava)) this.vy = Math.min(0, this.vy);
 
     if (!wasOnGround && this.onGround) {
       const v = this._maxFallSpeed;

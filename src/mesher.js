@@ -18,6 +18,65 @@ const ATLAS_SIZE = ATLAS_TILES * TILE_PX;
 /** Surface water top is slightly below the block top for a visible edge next to shores. */
 const WATER_TOP_INSET = 1 / 16;
 
+/** Still water / source: full block top. Flow levels 1–7 → lower surface (MC-style decay). */
+function waterFlatTopY(world, bx, by, bz) {
+  if (world.get(bx, by, bz) !== BlockId.WATER) return by + 1;
+  if (world.inBounds(bx, by + 1, bz) && world.get(bx, by + 1, bz) === BlockId.WATER) {
+    return by + 1;
+  }
+  const lv = world.getWaterLevel(bx, by, bz);
+  if (lv <= 0) return by + 1 - WATER_TOP_INSET;
+  const L = Math.min(7, lv);
+  return by + (8 - L) / 8;
+}
+
+/** Shared corner height for sloped top (min of adjacent water surfaces). */
+function waterCornerTopY(world, yLayer, gx, gz) {
+  let minH = Infinity;
+  for (const [bx, bz] of [
+    [gx - 1, gz - 1],
+    [gx, gz - 1],
+    [gx - 1, gz],
+    [gx, gz],
+  ]) {
+    if (!world.inBounds(bx, yLayer, bz)) continue;
+    if (world.get(bx, yLayer, bz) !== BlockId.WATER) continue;
+    minH = Math.min(minH, waterFlatTopY(world, bx, yLayer, bz));
+  }
+  return Number.isFinite(minH) ? minH : yLayer + 1;
+}
+
+function waterNeighborSurfaceH(world, bx, by, bz) {
+  const id = world.get(bx, by, bz);
+  if (id === BlockId.WATER) return waterFlatTopY(world, bx, by, bz);
+  if (id === 0) return by;
+  return null;
+}
+
+/** Horizontal flow toward lower surface / empty (for texture current). */
+function waterFlowDir(world, x, y, z) {
+  const my = waterFlatTopY(world, x, y, z);
+  let gx = 0;
+  let gz = 0;
+  for (const [ox, oz] of [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ]) {
+    const nx = x + ox;
+    const nz = z + oz;
+    if (!world.inBounds(nx, y, nz)) continue;
+    const nh = waterNeighborSurfaceH(world, nx, y, nz);
+    if (nh === null) continue;
+    gx += ox * (nh - my);
+    gz += oz * (nh - my);
+  }
+  const len = Math.hypot(gx, gz);
+  if (len < 1e-5) return { fx: 1, fz: 0 };
+  return { fx: -gx / len, fz: -gz / len };
+}
+
 function uvCorners(tx, ty) {
   const u0 = (tx * TILE_PX) / ATLAS_SIZE;
   const u1 = ((tx + 1) * TILE_PX) / ATLAS_SIZE;
@@ -67,6 +126,9 @@ function pushQuad(
   ao4,
   waterDepthBuf,
   waterDepthVal,
+  waterFlowBuf = null,
+  waterFlowU = 0,
+  waterFlowV = 0,
 ) {
   const b = positions.length / 3;
   for (const [px, py, pz] of verts) {
@@ -81,6 +143,11 @@ function pushQuad(
   }
   if (waterDepthBuf) {
     waterDepthBuf.push(waterDepthVal, waterDepthVal, waterDepthVal, waterDepthVal);
+  }
+  if (waterFlowBuf) {
+    for (let i = 0; i < 4; i++) {
+      waterFlowBuf.push(waterFlowU, waterFlowV);
+    }
   }
   indices.push(b, b + 1, b + 2, b, b + 2, b + 3);
 }
@@ -514,7 +581,7 @@ function isSolid(world, x, y, z) {
   return BLOCKS[id].solid && !BLOCKS[id].alpha ? 1 : 0;
 }
 
-function buildGeoFromBuffers(positions, normals, uvs, indices, colors, waterDepths) {
+function buildGeoFromBuffers(positions, normals, uvs, indices, colors, waterDepths = null, waterFlows = null) {
   const geo = new THREE.BufferGeometry();
   if (positions.length === 0) {
     return geo;
@@ -525,6 +592,9 @@ function buildGeoFromBuffers(positions, normals, uvs, indices, colors, waterDept
   geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   if (waterDepths && waterDepths.length === positions.length / 3) {
     geo.setAttribute('waterDepth', new THREE.Float32BufferAttribute(waterDepths, 1));
+  }
+  if (waterFlows && waterFlows.length === (positions.length / 3) * 2) {
+    geo.setAttribute('waterFlow', new THREE.Float32BufferAttribute(waterFlows, 2));
   }
   geo.setIndex(indices);
   geo.computeBoundingSphere();
@@ -542,7 +612,7 @@ const WATER_DEPTH_NORMALIZE = 10;
  * 0 if no water. Same value for every water block in that column so top faces show depth.
  * @param {import('./world.js').World} world
  */
-function buildWaterColumnDepthCache(world, xa, xb, za, zb, h) {
+function buildFluidColumnDepthCache(world, xa, xb, za, zb, h, fluidId) {
   const cw = xb - xa;
   const cache = new Float32Array(cw * (zb - za));
   let i = 0;
@@ -550,14 +620,17 @@ function buildWaterColumnDepthCache(world, xa, xb, za, zb, h) {
     for (let x = xa; x < xb; x++) {
       let topY = -1;
       for (let yy = h - 1; yy >= 0; yy--) {
-        if (world.get(x, yy, z) === BlockId.WATER) { topY = yy; break; }
+        if (world.get(x, yy, z) === fluidId) {
+          topY = yy;
+          break;
+        }
       }
       if (topY < 0) {
         cache[i++] = 0;
         continue;
       }
       let depth = 0;
-      for (let yy = topY; yy >= 0 && world.get(x, yy, z) === BlockId.WATER; yy--) {
+      for (let yy = topY; yy >= 0 && world.get(x, yy, z) === fluidId; yy--) {
         depth++;
       }
       cache[i++] = depth;
@@ -597,7 +670,14 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
     waterU = [],
     waterI = [],
     waterC = [],
-    waterW = [];
+    waterW = [],
+    waterFlow = [];
+  const lavaP = [],
+    lavaN = [],
+    lavaU = [],
+    lavaI = [],
+    lavaC = [],
+    lavaW = [];
 
   const h = world.height;
   const xa = x0;
@@ -605,7 +685,8 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
   const za = z0;
   const zb = z1;
 
-  const waterColumnCache = buildWaterColumnDepthCache(world, xa, xb, za, zb, h);
+  const waterColumnCache = buildFluidColumnDepthCache(world, xa, xb, za, zb, h, BlockId.WATER);
+  const lavaColumnCache = buildFluidColumnDepthCache(world, xa, xb, za, zb, h, BlockId.LAVA);
 
   for (let z = za; z < zb; z++) {
     for (let y = 0; y < h; y++) {
@@ -725,13 +806,22 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
           indices = opaqueI;
           colors = opaqueC;
           wBuf = null;
-        } else if (def.fluid) {
+        } else if (id === BlockId.WATER) {
           positions = waterP;
           normals = waterN;
           uvs = waterU;
           indices = waterI;
           colors = waterC;
           wBuf = waterW;
+        } else if (id === BlockId.LAVA) {
+          positions = lavaP;
+          normals = lavaN;
+          uvs = lavaU;
+          indices = lavaI;
+          colors = lavaC;
+          wBuf = lavaW;
+        } else if (def.fluid) {
+          continue;
         } else {
           positions = cutoutP;
           normals = cutoutN;
@@ -740,19 +830,52 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
           colors = cutoutC;
           wBuf = null;
         }
-        const wdep = def.fluid ? normalizedWaterMurk(waterColumnCache, xa, xb, za, x, z) : 0;
-        const waterAbove =
-          !!def.fluid &&
+        const wdep =
+          id === BlockId.WATER
+            ? normalizedWaterMurk(waterColumnCache, xa, xb, za, x, z)
+            : id === BlockId.LAVA
+              ? normalizedWaterMurk(lavaColumnCache, xa, xb, za, x, z)
+              : 0;
+        const fluidAbove =
+          (id === BlockId.WATER || id === BlockId.LAVA) &&
           world.inBounds(x, y + 1, z) &&
-          world.get(x, y + 1, z) === BlockId.WATER;
-        const yTopV = def.fluid && !waterAbove ? y + 1 - WATER_TOP_INSET : y + 1;
+          world.get(x, y + 1, z) === id;
+        const yTopV = id === BlockId.LAVA && !fluidAbove ? y + 1 - WATER_TOP_INSET : y + 1;
+
+        let c00 = yTopV;
+        let c10 = yTopV;
+        let c11 = yTopV;
+        let c01 = yTopV;
+        let wFlowBuf = null;
+        let wfx = 0;
+        let wfz = 0;
+        if (id === BlockId.WATER) {
+          c00 = waterCornerTopY(world, y, x, z);
+          c10 = waterCornerTopY(world, y, x + 1, z);
+          c11 = waterCornerTopY(world, y, x + 1, z + 1);
+          c01 = waterCornerTopY(world, y, x, z + 1);
+          const fd = waterFlowDir(world, x, y, z);
+          wfx = fd.fx;
+          wfz = fd.fz;
+          wFlowBuf = waterFlow;
+        }
+
+        const tpx = x + 1;
+        const tpz = z + 1;
+        const eXpZ =
+          id === BlockId.WATER ? waterCornerTopY(world, y, tpx, z) : yTopV;
+        const eXpZp =
+          id === BlockId.WATER ? waterCornerTopY(world, y, tpx, tpz) : yTopV;
+        const eXZp =
+          id === BlockId.WATER ? waterCornerTopY(world, y, x, tpz) : yTopV;
+        const eXZ = id === BlockId.WATER ? waterCornerTopY(world, y, x, z) : yTopV;
 
         if (!shouldCull(world, x, y, z, 1, 0, 0, isAlpha)) {
           const c = uvCorners(def.side[0], def.side[1]);
           const ax = x + 1;
           const a0 = vertexAO(world, ax, y, z, 0, -1, 0, 0, 0, -1);
-          const a1 = vertexAO(world, ax, yTopV, z, 0, 1, 0, 0, 0, -1);
-          const a2 = vertexAO(world, ax, yTopV, z + 1, 0, 1, 0, 0, 0, 1);
+          const a1 = vertexAO(world, ax, eXpZ, z, 0, 1, 0, 0, 0, -1);
+          const a2 = vertexAO(world, ax, eXpZp, z + 1, 0, 1, 0, 0, 0, 1);
           const a3 = vertexAO(world, ax, y, z + 1, 0, -1, 0, 0, 0, 1);
           pushQuad(
             positions,
@@ -765,21 +888,24 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             0,
             [
               [ax, y, z],
-              [ax, yTopV, z],
-              [ax, yTopV, z + 1],
+              [ax, eXpZ, z],
+              [ax, eXpZp, z + 1],
               [ax, y, z + 1],
             ],
             [c.bl, c.tl, c.tr, c.br],
             [a0, a1, a2, a3],
             wBuf,
             wdep,
+            wFlowBuf,
+            wfx,
+            wfz,
           );
         }
         if (!shouldCull(world, x, y, z, -1, 0, 0, isAlpha)) {
           const c = uvCorners(def.side[0], def.side[1]);
           const a0 = vertexAO(world, x, y, z + 1, 0, -1, 0, 0, 0, 1);
-          const a1 = vertexAO(world, x, yTopV, z + 1, 0, 1, 0, 0, 0, 1);
-          const a2 = vertexAO(world, x, yTopV, z, 0, 1, 0, 0, 0, -1);
+          const a1 = vertexAO(world, x, eXZp, z + 1, 0, 1, 0, 0, 0, 1);
+          const a2 = vertexAO(world, x, eXZ, z, 0, 1, 0, 0, 0, -1);
           const a3 = vertexAO(world, x, y, z, 0, -1, 0, 0, 0, -1);
           pushQuad(
             positions,
@@ -792,23 +918,25 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             0,
             [
               [x, y, z + 1],
-              [x, yTopV, z + 1],
-              [x, yTopV, z],
+              [x, eXZp, z + 1],
+              [x, eXZ, z],
               [x, y, z],
             ],
             [c.br, c.tr, c.tl, c.bl],
             [a0, a1, a2, a3],
             wBuf,
             wdep,
+            wFlowBuf,
+            wfx,
+            wfz,
           );
         }
         if (!shouldCull(world, x, y, z, 0, 1, 0, isAlpha)) {
           const c = uvCorners(def.top[0], def.top[1]);
-          const ay = yTopV;
-          const a0 = vertexAO(world, x, ay, z, -1, 0, 0, 0, 0, -1);
-          const a1 = vertexAO(world, x + 1, ay, z, 1, 0, 0, 0, 0, -1);
-          const a2 = vertexAO(world, x + 1, ay, z + 1, 1, 0, 0, 0, 0, 1);
-          const a3 = vertexAO(world, x, ay, z + 1, -1, 0, 0, 0, 0, 1);
+          const a0 = vertexAO(world, x, c00, z, -1, 0, 0, 0, 0, -1);
+          const a1 = vertexAO(world, x + 1, c10, z, 1, 0, 0, 0, 0, -1);
+          const a2 = vertexAO(world, x + 1, c11, z + 1, 1, 0, 0, 0, 0, 1);
+          const a3 = vertexAO(world, x, c01, z + 1, -1, 0, 0, 0, 0, 1);
           pushQuad(
             positions,
             normals,
@@ -819,15 +947,18 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             1,
             0,
             [
-              [x, ay, z],
-              [x, ay, z + 1],
-              [x + 1, ay, z + 1],
-              [x + 1, ay, z],
+              [x, c00, z],
+              [x, c01, z + 1],
+              [x + 1, c11, z + 1],
+              [x + 1, c10, z],
             ],
             [c.bl, c.tl, c.tr, c.br],
             [a0, a3, a2, a1],
             wBuf,
             wdep,
+            wFlowBuf,
+            wfx,
+            wfz,
           );
         }
         if (!shouldCull(world, x, y, z, 0, -1, 0, isAlpha)) {
@@ -855,14 +986,17 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             [a0, a1, a2, a3],
             wBuf,
             wdep,
+            wFlowBuf,
+            wfx,
+            wfz,
           );
         }
         if (!shouldCull(world, x, y, z, 0, 0, 1, isAlpha)) {
           const c = uvCorners(def.side[0], def.side[1]);
           const az = z + 1;
           const a0 = vertexAO(world, x + 1, y, az, 1, 0, 0, 0, -1, 0);
-          const a1 = vertexAO(world, x + 1, yTopV, az, 1, 0, 0, 0, 1, 0);
-          const a2 = vertexAO(world, x, yTopV, az, -1, 0, 0, 0, 1, 0);
+          const a1 = vertexAO(world, x + 1, eXpZp, az, 1, 0, 0, 0, 1, 0);
+          const a2 = vertexAO(world, x, eXZp, az, -1, 0, 0, 0, 1, 0);
           const a3 = vertexAO(world, x, y, az, -1, 0, 0, 0, -1, 0);
           pushQuad(
             positions,
@@ -875,21 +1009,24 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             1,
             [
               [x + 1, y, az],
-              [x + 1, yTopV, az],
-              [x, yTopV, az],
+              [x + 1, eXpZp, az],
+              [x, eXZp, az],
               [x, y, az],
             ],
             [c.br, c.tr, c.tl, c.bl],
             [a0, a1, a2, a3],
             wBuf,
             wdep,
+            wFlowBuf,
+            wfx,
+            wfz,
           );
         }
         if (!shouldCull(world, x, y, z, 0, 0, -1, isAlpha)) {
           const c = uvCorners(def.side[0], def.side[1]);
           const a0 = vertexAO(world, x, y, z, -1, 0, 0, 0, -1, 0);
-          const a1 = vertexAO(world, x, yTopV, z, -1, 0, 0, 0, 1, 0);
-          const a2 = vertexAO(world, x + 1, yTopV, z, 1, 0, 0, 0, 1, 0);
+          const a1 = vertexAO(world, x, eXZ, z, -1, 0, 0, 0, 1, 0);
+          const a2 = vertexAO(world, x + 1, eXpZ, z, 1, 0, 0, 0, 1, 0);
           const a3 = vertexAO(world, x + 1, y, z, 1, 0, 0, 0, -1, 0);
           pushQuad(
             positions,
@@ -902,14 +1039,17 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
             -1,
             [
               [x, y, z],
-              [x, yTopV, z],
-              [x + 1, yTopV, z],
+              [x, eXZ, z],
+              [x + 1, eXpZ, z],
               [x + 1, y, z],
             ],
             [c.bl, c.tl, c.tr, c.br],
             [a0, a1, a2, a3],
             wBuf,
             wdep,
+            wFlowBuf,
+            wfx,
+            wfz,
           );
         }
       }
@@ -919,7 +1059,8 @@ export function buildRegionMesh(world, x0, x1, z0, z1) {
   return {
     opaque: buildGeoFromBuffers(opaqueP, opaqueN, opaqueU, opaqueI, opaqueC),
     cutout: buildGeoFromBuffers(cutoutP, cutoutN, cutoutU, cutoutI, cutoutC),
-    water: buildGeoFromBuffers(waterP, waterN, waterU, waterI, waterC, waterW),
+    water: buildGeoFromBuffers(waterP, waterN, waterU, waterI, waterC, waterW, waterFlow),
+    lava: buildGeoFromBuffers(lavaP, lavaN, lavaU, lavaI, lavaC, lavaW),
   };
 }
 

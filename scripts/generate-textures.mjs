@@ -354,6 +354,38 @@ function water(d, w, tx, ty) {
   });
 }
 
+/** Procedural lava — same idea as water (depth tint, noise, bright cracks) but molten palette. */
+function lava(d, w, tx, ty) {
+  paintTile16Mc(d, w, tx, ty, (i, j, ttx, tty) => {
+    const n = hash2(i + ttx * 41, j + tty * 47, 1901);
+    const n2 = hash2(i * 2 + 11, j * 2 + 13, 1905);
+    const n3 = hash2(j, i + ttx, 1906);
+    const depthGrad = (j / Math.max(1, G - 1)) * 0.55;
+    const hWave = Math.sin((i * 0.38 + j * 0.29 + tty * 0.09) * 1.1) * 0.5 + 0.5;
+    let r = Math.floor(220 + depthGrad * 22 + hWave * 18 + n * 14);
+    let g = Math.floor(58 + depthGrad * 35 + hWave * 28 + n2 * 18);
+    let b = Math.floor(12 + depthGrad * 18 + hWave * 10 + n3 * 8);
+    const glow = Math.sin((i + j) * 0.68 + (i - j) * 0.42 + ttx * 0.18) * 0.5 + 0.5;
+    if (glow > 0.82 && n > 0.48) {
+      r = Math.min(255, r + 28);
+      g = Math.min(255, g + 42);
+      b = Math.min(255, b + 18);
+    }
+    if (glow < 0.22 && n2 < 0.35) {
+      r = Math.floor(r * 0.72);
+      g = Math.floor(g * 0.55);
+      b = Math.floor(b * 0.5);
+    }
+    if (hash2(i, j, 1907) > 0.91) {
+      r = 255;
+      g = Math.min(255, g + 50);
+      b = Math.min(255, b + 24);
+    }
+    const a = Math.floor(255 * (0.58 + n * 0.1 + glow * 0.12));
+    return [r, g, b, a];
+  });
+}
+
 function bedrock(d, w, tx, ty) {
   paintTile16Mc(d, w, tx, ty, (i, j, ttx, tty) => {
     const n = hash2(i + ttx * 89, j + tty * 97, 200);
@@ -1294,6 +1326,8 @@ function rowOresFurnaceDoorArmor(d, w) {
       '################',
     ],
   );
+  lava(d, w, 13, 3);
+
   drawPixelArt(
     d,
     w,
@@ -1673,6 +1707,7 @@ function main() {
     ['iron_boots', 7, 3],
     ['tall_grass', 8, 3],
     ['short_grass', 9, 3],
+    ['lava', 13, 3],
   ];
   for (const [name, tx, ty] of names) {
     const tile = extractTile(atlasPng.data, tx, ty);

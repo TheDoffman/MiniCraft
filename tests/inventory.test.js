@@ -24,6 +24,8 @@ describe('inventory helpers', () => {
     expect(canPickupBlock(BlockId.CRAFTING_TABLE)).toBe(true);
     expect(canPickupBlock(BlockId.DOOR)).toBe(true);
     expect(canPickupBlock(BlockId.PORKCHOP)).toBe(true);
+    expect(canPickupBlock(BlockId.WATER)).toBe(false);
+    expect(canPickupBlock(BlockId.LAVA)).toBe(false);
   });
 
   it('deserializeInvSlot normalizes one slot', () => {

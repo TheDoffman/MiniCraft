@@ -94,6 +94,7 @@ export function isEmptySlot(s) {
  */
 export function canPickupBlock(blockId) {
   if (blockId <= 0) return false;
+  if (BLOCKS[blockId]?.fluid) return false;
   if (blockId >= BlockId.PORKCHOP) return true;
   if (blockId === BlockId.FURNACE || blockId === BlockId.CRAFTING_TABLE || blockId === BlockId.DOOR)
     return true;

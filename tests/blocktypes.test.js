@@ -13,6 +13,8 @@ describe('BlockId ↔ BLOCKS alignment', () => {
     expect(BLOCKS[BlockId.SHORT_GRASS].name).toBe('short grass');
     expect(BLOCKS[BlockId.CRAFTING_TABLE].name).toBe('crafting table');
     expect(BLOCKS[BlockId.CRAFTING_TABLE].interactable).toBe(true);
+    expect(BLOCKS[BlockId.LAVA].name).toBe('lava');
+    expect(BLOCKS[BlockId.LAVA].fluid).toBe(true);
     expect(BLOCKS[BlockId.DOOR_TOP].name).toBe('door top');
     expect(BLOCKS[BlockId.DOOR_OPEN_TOP].name).toBe('door open top');
   });

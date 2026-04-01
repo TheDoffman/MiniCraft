@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 
 const S = 48;
+/** One horizontal strip: 6 faces × S px (same order as BoxGeometry material indices). */
+const HEAD_STRIP_W = S * 6;
 /** 48px faces → 16×16 logical texels (Minecraft-style skin resolution). */
 const SKIN_CHUNK = 3;
 
@@ -273,6 +275,32 @@ function drawHeadBack(ctx, w, h) {
 }
 
 /**
+ * Second-layer head box front (+z): hair / bangs only (Minecraft-style outer skin layer).
+ * Rest stays transparent so the inner head’s {@link drawHeadFront} face is visible.
+ */
+function drawHeadOverlayFront(ctx, w, h) {
+  ctx.clearRect(0, 0, w, h);
+  const hairTop = Math.floor(h * 0.24);
+  for (let y = 0; y < hairTop; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = n2(x, y, 5102);
+      ctx.fillStyle = `rgba(${40 + v * 22},${26 + v * 14},${16 + v * 10},1)`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  const bangL = Math.floor(w * 0.16);
+  const bangR = Math.floor(w * 0.84);
+  for (let y = hairTop; y < hairTop + 6; y++) {
+    for (let x = bangL; x < bangR; x++) {
+      if (Math.abs(x - w * 0.5) < w * 0.14) continue;
+      const v = n2(x, y, 5103);
+      ctx.fillStyle = `rgba(${46 + v * 20},${30 + v * 12},${18 + v * 8},1)`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+}
+
+/**
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} w
  * @param {number} h
@@ -466,6 +494,72 @@ function makeCanvas(drawFn) {
 }
 
 /**
+ * Paints each drawer into a horizontal strip [+x, −x, +y, −y, +z, −z] → full head texture atlas.
+ * @param {((ctx: CanvasRenderingContext2D, w: number, h: number) => void)[]} drawers
+ */
+function createHeadStripAtlasCanvas(drawers) {
+  const c = document.createElement('canvas');
+  c.width = HEAD_STRIP_W;
+  c.height = S;
+  const ctx = c.getContext('2d');
+  if (!ctx) throw new Error('2d');
+  if (drawers.length !== 6) throw new Error('head strip needs 6 faces');
+  for (let i = 0; i < 6; i++) {
+    ctx.save();
+    ctx.translate(i * S, 0);
+    ctx.beginPath();
+    ctx.rect(0, 0, S, S);
+    ctx.clip();
+    drawers[i](ctx, S, S);
+    ctx.restore();
+  }
+  return c;
+}
+
+/**
+ * Six materials sharing one atlas; each samples a 1/6-wide column (BoxGeometry face order).
+ * @param {HTMLCanvasElement} canvas
+ * @param {(faceIndex: number) => Record<string, unknown>} [extraForFace]
+ */
+function materialsFromHeadStripCanvas(canvas, extraForFace) {
+  const t0 = new THREE.CanvasTexture(canvas);
+  t0.colorSpace = THREE.SRGBColorSpace;
+  t0.magFilter = THREE.NearestFilter;
+  t0.minFilter = THREE.NearestFilter;
+  t0.wrapS = THREE.ClampToEdgeWrapping;
+  t0.wrapT = THREE.ClampToEdgeWrapping;
+  /** @type {THREE.MeshLambertMaterial[]} */
+  const mats = [];
+  for (let i = 0; i < 6; i++) {
+    const t = i === 0 ? t0 : t0.clone();
+    t.repeat.set(1 / 6, 1);
+    t.offset.set(i / 6, 0);
+    t.needsUpdate = true;
+    const extra = extraForFace ? extraForFace(i) : {};
+    mats.push(
+      new THREE.MeshLambertMaterial({
+        map: t,
+        flatShading: true,
+        ...extra,
+      }),
+    );
+  }
+  return mats;
+}
+
+function drawOverlayHairFace(ctx, w, h, seed) {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = n2(x, y, seed + 800);
+      ctx.fillStyle = `rgb(${38 + v * 22},${24 + v * 14},${14 + v * 9})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  ctx.fillRect(Math.floor(w * 0.35), 2, Math.floor(w * 0.3), Math.floor(h * 0.35));
+}
+
+/**
  * @param {HTMLCanvasElement} canvas
  */
 function matFromCanvas(canvas, opts = {}) {
@@ -500,15 +594,34 @@ export function buildFirstPersonArmMaterialSet() {
 
 /**
  * BoxGeometry face order: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z front, 5 -z back
+ *
+ * Inner head + overlay each use one **full strip atlas** (6×S px) so the head is one texture sheet.
  */
 export function buildPlayerModelMaterials() {
-  const headRight = matFromCanvas(makeCanvas((c, w, h) => drawHeadSide(c, w, h, true))); // +x
-  const headLeft = matFromCanvas(makeCanvas((c, w, h) => drawHeadSide(c, w, h, false))); // −x
-  const headTop = matFromCanvas(makeCanvas(drawHeadTop));
-  const headBot = matFromCanvas(makeCanvas(drawHeadBottom));
-  const headFront = matFromCanvas(makeCanvas(drawHeadFront));
-  const headBack = matFromCanvas(makeCanvas(drawHeadBack));
-  const headMats = [headRight, headLeft, headTop, headBot, headFront, headBack];
+  const innerHeadCanvas = createHeadStripAtlasCanvas([
+    (c, w, h) => drawHeadSide(c, w, h, true),
+    (c, w, h) => drawHeadSide(c, w, h, false),
+    drawHeadTop,
+    drawHeadBottom,
+    drawHeadFront,
+    drawHeadBack,
+  ]);
+  const headMats = materialsFromHeadStripCanvas(innerHeadCanvas);
+
+  const overlaySeeds = [701, 702, 703, 704, 705, 706];
+  const overlayCanvas = createHeadStripAtlasCanvas([
+    (c, w, h) => drawOverlayHairFace(c, w, h, overlaySeeds[0]),
+    (c, w, h) => drawOverlayHairFace(c, w, h, overlaySeeds[1]),
+    (c, w, h) => drawOverlayHairFace(c, w, h, overlaySeeds[2]),
+    (c, w, h) => drawOverlayHairFace(c, w, h, overlaySeeds[3]),
+    drawHeadOverlayFront,
+    (c, w, h) => drawOverlayHairFace(c, w, h, overlaySeeds[5]),
+  ]);
+  const overlayMats = materialsFromHeadStripCanvas(overlayCanvas, (faceIdx) =>
+    faceIdx === 4
+      ? { transparent: true, alphaTest: 0.06, depthWrite: false }
+      : {},
+  );
 
   const torsoRight = matFromCanvas(makeCanvas((c, w, h) => drawTorsoSide(c, w, h, 611)));
   const torsoLeft = matFromCanvas(makeCanvas((c, w, h) => drawTorsoSide(c, w, h, 612)));
@@ -537,22 +650,6 @@ export function buildPlayerModelMaterials() {
   ];
 
   const handMat = matFromCanvas(makeCanvas(drawArmHandEnd));
-
-  const overlayMats = [701, 702, 703, 704, 705, 706].map((seed) =>
-    matFromCanvas(
-      makeCanvas((c, w, h) => {
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            const v = n2(x, y, seed + 800);
-            c.fillStyle = `rgb(${38 + v * 22},${24 + v * 14},${14 + v * 9})`;
-            c.fillRect(x, y, 1, 1);
-          }
-        }
-        c.fillStyle = 'rgba(255,255,255,0.05)';
-        c.fillRect(Math.floor(w * 0.35), 2, Math.floor(w * 0.3), Math.floor(h * 0.35));
-      }),
-    ),
-  );
 
   return { headMats, torsoMats, legMats, armMats, handMat, overlayMats };
 }

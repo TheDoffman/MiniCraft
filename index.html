@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Tiny5&family=VT323&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700&family=Press+Start+2P&family=Tiny5&family=VT323&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/src/style.css" />
@@ -41,7 +41,10 @@
       </div>
       <div id="inventoryPanel" class="hidden" aria-hidden="true">
         <div class="inv-panel">
-          <div class="inv-title">Inventory</div>
+          <div class="inv-header">
+            <h2 class="inv-title">Inventory</h2>
+            <p class="inv-subtitle">Drag items or click to move · Shift-click moves stacks</p>
+          </div>
           <div class="inv-body">
             <div class="inv-doll-area">
               <div id="invArmorRail" class="inv-armor-rail" aria-label="Armor"></div>
@@ -83,12 +86,15 @@
               </div>
             </div>
           </div>
-          <p class="inv-hint">Press <kbd>E</kbd> or <kbd>Esc</kbd> to close</p>
+          <p class="inv-hint"><kbd>E</kbd> or <kbd>Esc</kbd> to close</p>
         </div>
       </div>
       <div id="furnacePanel" class="hidden furnace-panel" aria-hidden="true">
         <div class="inv-panel">
-          <div class="inv-title">Furnace</div>
+          <div class="inv-header">
+            <h2 class="inv-title">Furnace</h2>
+            <p class="inv-subtitle">Smelt ores and cook food</p>
+          </div>
           <div class="furnace-body">
             <div class="furnace-slots">
               <div class="furnace-label">Input</div>
@@ -103,12 +109,15 @@
               <div id="furnaceProgressFill" class="furnace-progress-fill"></div>
             </div>
           </div>
-          <p class="inv-hint">Press <kbd>E</kbd> or <kbd>Esc</kbd> to close</p>
+          <p class="inv-hint"><kbd>E</kbd> or <kbd>Esc</kbd> to close</p>
         </div>
       </div>
       <div id="craftingTablePanel" class="hidden crafting-table-panel" aria-hidden="true">
         <div class="inv-panel">
-          <div class="inv-title">Crafting</div>
+          <div class="inv-header">
+            <h2 class="inv-title">Crafting table</h2>
+            <p class="inv-subtitle">3×3 recipes · Click result to craft</p>
+          </div>
           <div class="crafting-table-body">
             <div class="craft-table-craft-row">
               <div id="craftTableGrid" class="craft-grid craft-grid-3x3" aria-label="Crafting grid"></div>
@@ -120,7 +129,7 @@
             <div class="inv-section-label">Hotbar</div>
             <div id="craftTableInvHotbar" class="inv-grid inv-grid-hotbar-panel" aria-label="Hotbar"></div>
           </div>
-          <p class="inv-hint">Press <kbd>E</kbd> or <kbd>Esc</kbd> to close</p>
+          <p class="inv-hint"><kbd>E</kbd> or <kbd>Esc</kbd> to close</p>
         </div>
       </div>
       <div id="deathScreen" class="death-screen hidden" aria-hidden="true">

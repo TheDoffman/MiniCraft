@@ -3,6 +3,7 @@ import { TorchAttach } from './torchAttach.js';
 import { biomeParam, hashSeed, surfaceHeight, getBiome, BIOME, caveNoise } from './worldgen.js';
 import { CHUNK_XZ } from './chunks.js';
 import { SEA_LEVEL } from './gameState.js';
+import { recomputeWaterBox } from './waterFlow.js';
 
 export { biomeParam, hashSeed, surfaceHeight, getBiome, BIOME, caveNoise } from './worldgen.js';
 
@@ -516,12 +517,21 @@ export class World {
       }
     }
     this._placeOresInBuffer(cx, cz, buf);
+    this._placeLavaInCavesInBuffer(cx, cz, buf);
     this._carveWaterInChunk(cx, cz);
     this._replaceSolidUnderWaterInChunk(cx, cz);
     this._treesInChunk(cx, cz);
     this._placeBiomeFeatures(cx, cz);
     this._tallGrassInChunk(cx, cz);
     this._shortGrassInChunk(cx, cz);
+
+    /* Propagate sources into adjacent air (rivers, caves, chunk borders). */
+    const pad = 16;
+    const x0 = cx * CHUNK_XZ - pad;
+    const x1 = (cx + 1) * CHUNK_XZ - 1 + pad;
+    const z0 = cz * CHUNK_XZ - pad;
+    const z1 = (cz + 1) * CHUNK_XZ - 1 + pad;
+    recomputeWaterBox(this, x0, x1, 0, h - 1, z0, z1);
   }
 
   /**
@@ -564,6 +574,107 @@ export class World {
           if (y <= 16 && r >= 0.053 && r < 0.057) {
             buf[idx] = BlockId.DIAMOND_ORE;
           }
+        }
+      }
+    }
+  }
+
+  /**
+   * Rare lava **pools** on deep cave floors only: horizontal discs of lava over stone/ore,
+   * using the same cave mask as carving. Runs before ocean/river water fill.
+   * @param {Uint8Array} buf
+   */
+  _placeLavaInCavesInBuffer(cx, cz, buf) {
+    const { seed, height: h } = this;
+    const BASE_THRESHOLD = 0.016;
+    /** Must be at least this many blocks below local surface (deep mines / lower caves). */
+    const LAVA_MIN_DEPTH_BELOW_SURFACE = 32;
+    /** Never above this world Y (keeps lava out of mid-level tunnels). */
+    const LAVA_ABSOLUTE_MAX_Y = 22;
+    /** Rare pool centres per suitable floor cell (pools span multiple blocks). */
+    const POOL_SEED_HASH = 0.0024;
+    const POOL_R_MAX = 4;
+
+    const isOreOrStone = (id) =>
+      id === BlockId.STONE ||
+      id === BlockId.COAL_ORE ||
+      id === BlockId.IRON_ORE ||
+      id === BlockId.DIAMOND_ORE;
+
+    /**
+     * @param {number} maxLavaY inclusive ceiling for this column
+     */
+    const lavaFloorOk = (lx, lz, y, wx, wz, sh, maxLavaY) => {
+      if (y > maxLavaY || y < 4) return false;
+      const idx = idxLocal(lx, y, lz, h);
+      if (buf[idx] !== BlockId.AIR) return false;
+      if (y + 1 >= h || buf[idxLocal(lx, y + 1, lz, h)] !== BlockId.AIR) return false;
+      const below = buf[idxLocal(lx, y - 1, lz, h)];
+      if (!isOreOrStone(below)) return false;
+      const surfaceFade = Math.min(1, (sh - y - 4) / 10);
+      const bottomFade = Math.min(1, (y - 2) / 8);
+      const threshold = BASE_THRESHOLD * surfaceFade * bottomFade;
+      return caveNoise(wx, y, wz, seed) < threshold;
+    };
+
+    for (let lz = 0; lz < CHUNK_XZ; lz++) {
+      for (let lx = 0; lx < CHUNK_XZ; lx++) {
+        const wx = cx * CHUNK_XZ + lx;
+        const wz = cz * CHUNK_XZ + lz;
+        const sh = surfaceHeight(wx, wz, seed);
+        const maxLavaY = Math.min(LAVA_ABSOLUTE_MAX_Y, sh - LAVA_MIN_DEPTH_BELOW_SURFACE);
+        if (maxLavaY < 5) continue;
+
+        const maxY = Math.min(sh - 5, h - 4, maxLavaY);
+        for (let y = 4; y <= maxY; y++) {
+          if (!lavaFloorOk(lx, lz, y, wx, wz, sh, maxLavaY)) continue;
+          if (hashSeed(wx, y, wz, seed + 8800) > POOL_SEED_HASH) continue;
+
+          const R = 2 + Math.floor(hashSeed(wx, wz, seed + 8801) * 2);
+
+          for (let dz = -POOL_R_MAX; dz <= POOL_R_MAX; dz++) {
+            for (let dx = -POOL_R_MAX; dx <= POOL_R_MAX; dx++) {
+              if (dx * dx + dz * dz > R * R) continue;
+              const nlx = lx + dx;
+              const nlz = lz + dz;
+              if (nlx < 0 || nlx >= CHUNK_XZ || nlz < 0 || nlz >= CHUNK_XZ) continue;
+              const nwx = cx * CHUNK_XZ + nlx;
+              const nwz = cz * CHUNK_XZ + nlz;
+              const nsh = surfaceHeight(nwx, nwz, seed);
+              const nMaxLavaY = Math.min(LAVA_ABSOLUTE_MAX_Y, nsh - LAVA_MIN_DEPTH_BELOW_SURFACE);
+              if (y > nMaxLavaY || !lavaFloorOk(nlx, nlz, y, nwx, nwz, nsh, nMaxLavaY)) continue;
+              buf[idxLocal(nlx, y, nlz, h)] = BlockId.LAVA;
+            }
+          }
+        }
+      }
+    }
+
+    /* One block deeper under some pool cells (lava above, not open sky — different from lavaFloorOk). */
+    const deepCellOk = (lx, lz, yi, wx, wz, sh, maxLavaY) => {
+      if (yi > maxLavaY || yi < 2) return false;
+      const iBelow = idxLocal(lx, yi, lz, h);
+      const iUnder = idxLocal(lx, yi - 1, lz, h);
+      if (buf[iBelow] !== BlockId.AIR || !isOreOrStone(buf[iUnder])) return false;
+      const surfaceFade = Math.min(1, (sh - yi - 4) / 10);
+      const bottomFade = Math.min(1, (yi - 2) / 8);
+      const threshold = BASE_THRESHOLD * surfaceFade * bottomFade;
+      return caveNoise(wx, yi, wz, seed) < threshold;
+    };
+
+    for (let lz = 0; lz < CHUNK_XZ; lz++) {
+      for (let lx = 0; lx < CHUNK_XZ; lx++) {
+        const wx = cx * CHUNK_XZ + lx;
+        const wz = cz * CHUNK_XZ + lz;
+        const sh = surfaceHeight(wx, wz, seed);
+        const maxLavaY = Math.min(LAVA_ABSOLUTE_MAX_Y, sh - LAVA_MIN_DEPTH_BELOW_SURFACE);
+        for (let y = 5; y <= maxLavaY; y++) {
+          const idx = idxLocal(lx, y, lz, h);
+          if (buf[idx] !== BlockId.LAVA) continue;
+          if (hashSeed(wx, y, wz, seed + 8803) > 0.38) continue;
+          const yi = y - 1;
+          if (!deepCellOk(lx, lz, yi, wx, wz, sh, maxLavaY)) continue;
+          buf[idxLocal(lx, yi, lz, h)] = BlockId.LAVA;
         }
       }
     }

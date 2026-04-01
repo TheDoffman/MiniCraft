@@ -644,9 +644,11 @@ function swapBlockAtlasFromFile(/** @type {THREE.Texture} */ loadedTex) {
   worldMat.map = loadedTex;
   cutoutMat.map = loadedTex;
   waterMat.map = loadedTex;
+  lavaMat.map = loadedTex;
   worldMat.needsUpdate = true;
   cutoutMat.needsUpdate = true;
   waterMat.needsUpdate = true;
+  lavaMat.needsUpdate = true;
   setBlockParticleAtlasTexture(loadedTex);
   const held = fpHand.userData.heldBlock;
   if (held?.material) {
@@ -701,13 +703,16 @@ function attachWaterDepthMurkShader(/** @type {THREE.MeshLambertMaterial} */ mat
         '#include <color_pars_vertex>',
         `#include <color_pars_vertex>
 attribute float waterDepth;
+attribute vec2 waterFlow;
 varying float vWaterDepth;
+varying vec2 vWaterFlow;
 `,
       )
       .replace(
         '#include <color_vertex>',
         `#include <color_vertex>
 vWaterDepth = waterDepth;
+vWaterFlow = waterFlow;
 `,
       );
     shader.fragmentShader = shader.fragmentShader
@@ -715,6 +720,7 @@ vWaterDepth = waterDepth;
         '#include <map_pars_fragment>',
         `#include <map_pars_fragment>
 uniform float uWaterTime;
+varying vec2 vWaterFlow;
 `,
       )
       .replace(
@@ -723,7 +729,7 @@ uniform float uWaterTime;
 		float _wt = uWaterTime;
 	vec2 _cell = floor(vMapUv * 16.0 + 0.0001);
 	vec2 _loc = fract(vMapUv * 16.0);
-	vec2 _flow = vec2(_wt * 0.022, _wt * 0.016);
+	vec2 _flow = vec2(_wt * 0.022, _wt * 0.016) + vWaterFlow * (0.05 + 0.02 * sin(_wt * 1.7));
 	vec2 _tf = fract(_loc + _flow);
 	vec2 _wShUv = (_cell + _tf) / 16.0;
 	vec4 sampledDiffuseColor = texture2D( map, _wShUv );
@@ -785,7 +791,94 @@ const waterMat = new THREE.MeshLambertMaterial({
   polygonOffsetUnits: 1,
 });
 attachWaterDepthMurkShader(waterMat);
-waterMat.customProgramCacheKey = () => 'waterdepthW+flow';
+waterMat.customProgramCacheKey = () => 'waterdepthW+flow+lv';
+
+function attachLavaDepthMurkShader(/** @type {THREE.MeshLambertMaterial} */ mat) {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uWaterTime = waterShimmerUniforms.uWaterTime;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <color_pars_vertex>',
+        `#include <color_pars_vertex>
+attribute float waterDepth;
+varying float vWaterDepth;
+`,
+      )
+      .replace(
+        '#include <color_vertex>',
+        `#include <color_vertex>
+vWaterDepth = waterDepth;
+`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <map_pars_fragment>',
+        `#include <map_pars_fragment>
+uniform float uWaterTime;
+`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#ifdef USE_MAP
+		float _wt = uWaterTime;
+	vec2 _cell = floor(vMapUv * 16.0 + 0.0001);
+	vec2 _loc = fract(vMapUv * 16.0);
+	vec2 _flow = vec2(_wt * -0.026, _wt * 0.019);
+	vec2 _tf = fract(_loc + _flow);
+	vec2 _lShUv = (_cell + _tf) / 16.0;
+	vec4 sampledDiffuseColor = texture2D( map, _lShUv );
+	#ifdef DECODE_VIDEO_TEXTURE
+		sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
+	#endif
+	diffuseColor *= sampledDiffuseColor;
+#endif`,
+      )
+      .replace(
+        '#include <color_pars_fragment>',
+        `#include <color_pars_fragment>
+varying float vWaterDepth;
+`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+{
+	float wd = clamp( vWaterDepth, 0.0, 1.0 );
+	float murk = 1.0 - exp( -wd * 3.6 );
+	vec3 deepCol = vec3( 0.14, 0.02, 0.0 );
+	diffuseColor.rgb = mix( diffuseColor.rgb, deepCol, murk * 0.82 );
+	float a1 = diffuseColor.a + murk * 0.42;
+	diffuseColor.a = min( a1, 0.92 );
+}
+`,
+      )
+      .replace(
+        'vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance;',
+        `vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance;
+	vec3 lavaAlb = diffuseColor.rgb;
+	float lavaHot = max( lavaAlb.r, max( lavaAlb.g * 0.58, lavaAlb.b * 0.22 ) );
+	float lavaPulse = 0.88 + 0.12 * sin( uWaterTime * 2.6 + lavaHot * 5.5 );
+	vec3 lavaGlowTint = vec3( 1.0, 0.4, 0.1 );
+	outgoingLight += lavaGlowTint * lavaHot * lavaHot * ( 1.25 * lavaPulse );
+`,
+      );
+  };
+}
+
+const lavaMat = new THREE.MeshLambertMaterial({
+  map: atlasTex,
+  transparent: true,
+  opacity: 1.0,
+  depthWrite: true,
+  depthTest: true,
+  side: THREE.DoubleSide,
+  vertexColors: true,
+  polygonOffset: true,
+  polygonOffsetFactor: 1,
+  polygonOffsetUnits: 1,
+});
+attachLavaDepthMurkShader(lavaMat);
+lavaMat.customProgramCacheKey = () => 'lavadepthW+flow+glow';
 
 const mainMenuTerrainCanvas = document.getElementById('mainMenuTerrainCanvas');
 if (mainMenuTerrainCanvas instanceof HTMLCanvasElement && startEl) {
@@ -796,6 +889,7 @@ if (mainMenuTerrainCanvas instanceof HTMLCanvasElement && startEl) {
     worldMatTemplate: worldMat,
     cutoutMatTemplate: cutoutMat,
     waterMatTemplate: waterMat,
+    lavaMatTemplate: lavaMat,
   });
 }
 
@@ -882,7 +976,7 @@ resizeInvPlayerPreview = () => invPlayerPreview.resize();
 /* block_atlas.png override removed — all textures are now generated
    procedurally by buildAtlasCanvas() so new blocks always appear correctly. */
 
-/** @type {Map<string, { opaque: THREE.Mesh, cutout: THREE.Mesh, water: THREE.Mesh }>} */
+/** @type {Map<string, { opaque: THREE.Mesh, cutout: THREE.Mesh, water: THREE.Mesh, lava: THREE.Mesh }>} */
 const chunkMeshes = new Map();
 
 const urlSeedOnLoad = readSeedFromURL();
@@ -924,9 +1018,11 @@ function disposeChunkMeshByKey(key) {
   worldGroup.remove(old.opaque);
   worldGroup.remove(old.cutout);
   if (old.water) worldGroup.remove(old.water);
+  if (old.lava) worldGroup.remove(old.lava);
   old.opaque.geometry.dispose();
   old.cutout.geometry.dispose();
   if (old.water) old.water.geometry.dispose();
+  if (old.lava) old.lava.geometry.dispose();
   chunkMeshes.delete(key);
   chunkVisibilityEpoch++;
 }
@@ -1011,6 +1107,7 @@ function updateChunkDrawVisibility() {
     meshes.opaque.visible = vis;
     meshes.cutout.visible = vis;
     if (meshes.water) meshes.water.visible = vis;
+    if (meshes.lava) meshes.lava.visible = vis;
   }
 }
 
@@ -1051,16 +1148,18 @@ function processChunkBuildQueue(maxChunks, budgetMs) {
 
 function rebuildChunk(cx, cz) {
   const { x0, x1, z0, z1 } = regionForChunk(cx, cz);
-  const { opaque, cutout, water } = buildRegionMesh(world, x0, x1, z0, z1);
+  const { opaque, cutout, water, lava } = buildRegionMesh(world, x0, x1, z0, z1);
   const key = `${cx},${cz}`;
   const old = chunkMeshes.get(key);
   if (old) {
     worldGroup.remove(old.opaque);
     worldGroup.remove(old.cutout);
     if (old.water) worldGroup.remove(old.water);
+    if (old.lava) worldGroup.remove(old.lava);
     old.opaque.geometry.dispose();
     old.cutout.geometry.dispose();
     if (old.water) old.water.geometry.dispose();
+    if (old.lava) old.lava.geometry.dispose();
   }
   const mo = new THREE.Mesh(opaque, worldMat);
   mo.castShadow = true;
@@ -1074,8 +1173,12 @@ function rebuildChunk(cx, cz) {
   mw.castShadow = false;
   mw.receiveShadow = true;
   mw.renderOrder = 1 + tieBreak + 0.02;
-  worldGroup.add(mo, mc, mw);
-  chunkMeshes.set(key, { opaque: mo, cutout: mc, water: mw });
+  const ml = new THREE.Mesh(lava, lavaMat);
+  ml.castShadow = false;
+  ml.receiveShadow = true;
+  ml.renderOrder = 1 + tieBreak + 0.035;
+  worldGroup.add(mo, mc, mw, ml);
+  chunkMeshes.set(key, { opaque: mo, cutout: mc, water: mw, lava: ml });
   chunkVisibilityEpoch++;
 }
 
@@ -1484,7 +1587,7 @@ function syncPlayerModel(dt) {
   const walking =
     moving && player.onGround && Math.hypot(player.vx, player.vz) > 0.1;
   const sprinting =
-    canSprintNow() && player.onGround && !player.inWater;
+    canSprintNow() && player.onGround && !player.inWater && !player.inLava;
   if (playerModel.visible) {
     updatePlayerModelAnimation(playerModel, dt, { walking, sprinting });
   }
@@ -1529,6 +1632,7 @@ function syncCamera(dtSec = 0) {
       movingKeys &&
       player.onGround &&
       !player.inWater &&
+      !player.inLava &&
       horizSpd > 0.08;
     const bobTarget = wantBob ? 1 : 0;
     const k = Math.min(1, dtSec * WALK_BOB_LERP);
@@ -1537,7 +1641,8 @@ function syncCamera(dtSec = 0) {
   }
 
   if (gameSettings.viewBobbing && walkBobEnvelope > 0.01 && cameraViewMode === 0) {
-    const sprinting = canSprintNow() && player.onGround && !player.inWater;
+    const sprinting =
+      canSprintNow() && player.onGround && !player.inWater && !player.inLava;
     const freq = sprinting ? SPRINT_BOB_FREQ : WALK_BOB_FREQ;
     const ampMul = sprinting ? SPRINT_BOB_MUL : 1;
     const t = clock.getElapsedTime();
@@ -1937,24 +2042,19 @@ function completeBlockBreak(x, y, z) {
   if (gameMode === 'survival') {
     const drop = getBlockDrop(blockId);
     if (drop.count > 0 && canPickupBlock(drop.blockId)) {
-      let left = addItemToInventory(invSlots, drop.blockId, drop.count, { hotbarOnly: true });
-      if (left > 0) {
-        left = addItemToInventory(invSlots, drop.blockId, left, { backpackOnly: true });
-      }
-      if (left > 0) {
-        const spread = 0.1;
-        const gd = createGroundDrop(
-          x + 0.5 + (Math.random() - 0.5) * spread,
-          y + 0.14,
-          z + 0.5 + (Math.random() - 0.5) * spread,
-          drop.blockId,
-          left,
-          atlasTex,
-          world
-        );
-        scene.add(gd.mesh);
-        drops.push(gd);
-      }
+      const spread = 0.35;
+      const gd = createGroundDrop(
+        x + 0.5 + (Math.random() - 0.5) * spread,
+        y + 0.2,
+        z + 0.5 + (Math.random() - 0.5) * spread,
+        drop.blockId,
+        drop.count,
+        atlasTex,
+        world
+      );
+      gd.vy = -(1.8 + Math.random() * 1.4);
+      scene.add(gd.mesh);
+      drops.push(gd);
     }
     damageHeldToolForMining();
   }
@@ -3820,6 +3920,7 @@ function disposeEngine() {
   worldMat.dispose();
   cutoutMat.dispose();
   waterMat.dispose();
+  lavaMat.dispose();
   selection.geometry.dispose();
   selectionMat.dispose();
   crackGeo.dispose();
@@ -3885,7 +3986,7 @@ function loop() {
 
   if ((pointerLocked || invOpen) && !worldGuiOpen()) {
     const isSurvival = gameMode === 'survival';
-    const sprintMove = canSprintNow() && !player.inWater;
+    const sprintMove = canSprintNow() && !player.inWater && !player.inLava;
     keys.sprint = sprintMove || (gameMode === 'creative' && player.flying && sprintLatched && keys.forward);
 
     if (player.flying && gameMode === 'creative') {
@@ -3919,8 +4020,8 @@ function loop() {
     if (player.onGround && moving && !playerDead && !player.flying) {
       footstepCooldown -= dt;
       if (footstepCooldown <= 0) {
-        playSound(player.inWater ? 'splash' : 'footstep');
-        footstepCooldown = player.inWater ? 0.52 : 0.36;
+        playSound(player.inWater || player.inLava ? 'splash' : 'footstep');
+        footstepCooldown = player.inWater || player.inLava ? 0.52 : 0.36;
       }
     } else {
       footstepCooldown = Math.min(footstepCooldown, 0.1);
@@ -3931,6 +4032,9 @@ function loop() {
         sprintLatched = false;
         showDeathScreen('Fell out of the world');
       } else {
+        if (player.inLava && !player.flying) {
+          playerHealth = Math.max(0, playerHealth - 6 * dt);
+        }
         if (player.fallDamageThisFrame > 0) {
           const fd = damageAfterArmor(player.fallDamageThisFrame);
           playerHealth = Math.max(0, playerHealth - fd);
@@ -3939,7 +4043,12 @@ function loop() {
         }
         if (playerHealth <= 0) {
           sprintLatched = false;
-          const reason = player.fallDamageThisFrame > 0 ? 'Fell from a high place' : 'Starved to death';
+          const reason =
+            player.inLava && !player.flying
+              ? 'Burned in lava'
+              : player.fallDamageThisFrame > 0
+                ? 'Fell from a high place'
+                : 'Starved to death';
           showDeathScreen(reason);
         }
       }
