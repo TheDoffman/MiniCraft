@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head><title>test</title></head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui"><div id="start"><canvas id="mainMenuTerrainCanvas"></canvas></div></div>
+<pre id="log"></pre>
+<script type="module">
+const log = document.getElementById('log');
+function l(msg) { log.textContent += msg + '\n'; console.log(msg); }
+try {
+  l('importing blocktypes...');
+  const bt = await import('/src/blocktypes.ts');
+  l('blocktypes OK, BLOCKS.length=' + bt.BLOCKS.length);
+  
+  l('importing worldgen...');
+  const wg = await import('/src/worldgen.ts');
+  l('worldgen OK');
+  
+  l('importing world...');
+  const w = await import('/src/world.ts');
+  l('world OK');
+  
+  l('creating World...');
+  const world = new w.World(128, 42);
+  l('World created');
+  
+  l('generating a chunk...');
+  world.get(0, 64, 0);
+  l('chunk generated OK');
+  
+  l('importing textures...');
+  const tex = await import('/src/textures.ts');
+  l('textures OK');
+  
+  l('building atlas...');
+  const atlas = tex.buildAtlasCanvas();
+  l('atlas built, size=' + atlas.width + 'x' + atlas.height);
+  
+  l('importing mesher...');
+  const mesher = await import('/src/mesher.ts');
+  l('mesher OK');
+  
+  l('building mesh...');
+  const mesh = mesher.buildRegionMesh(world, 0, 16, 0, 16);
+  l('mesh built OK');
+  
+  l('ALL TESTS PASSED');
+} catch (e) {
+  l('ERROR: ' + e.message);
+  l('STACK: ' + e.stack);
+}
+</script>
+</body>
+</html>

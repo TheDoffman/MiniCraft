@@ -9,13 +9,16 @@
     "build:textures": "node scripts/generate-textures.mjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "three": "^0.170.0"
   },
   "devDependencies": {
+    "@types/three": "^0.183.1",
     "pngjs": "^7.0.0",
+    "typescript": "^6.0.2",
     "vite": "^5.4.11",
     "vitest": "^3.0.0"
   }

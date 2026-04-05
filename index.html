@@ -16,6 +16,13 @@
     <div id="ui">
       <div id="underwaterOverlay" class="underwater-overlay" aria-hidden="true"></div>
       <div id="crosshair"></div>
+      <canvas
+        id="minimap"
+        width="96"
+        height="96"
+        class="minimap-canvas hidden"
+        aria-hidden="true"
+      ></canvas>
       <div id="hudBottom">
         <div id="statBars" aria-hidden="false">
           <div class="stat-block stat-health">
@@ -139,22 +146,45 @@
           <button type="button" id="respawnBtn" class="mc-btn mc-btn-primary">Respawn</button>
         </div>
       </div>
+      <div id="worldGenScreen" class="world-gen-screen hidden" aria-hidden="true">
+        <div class="world-gen-inner">
+          <h2 class="world-gen-title">Generating World</h2>
+          <div class="world-gen-bar-track">
+            <div id="worldGenFill" class="world-gen-bar-fill"></div>
+          </div>
+          <p id="worldGenLabel" class="world-gen-label">Building terrain...</p>
+          <button type="button" id="worldGenEnterBtn" class="mc-btn mc-btn-primary world-gen-enter hidden">Click to Play</button>
+        </div>
+      </div>
       <div id="coordsHud" class="coords-hud" aria-hidden="true"></div>
       <div id="fpsHud" class="coords-hud fps-hud" aria-hidden="true"></div>
       <div id="toastContainer" class="toast-container" aria-live="polite"></div>
       <div id="start">
         <canvas id="mainMenuTerrainCanvas" class="main-menu-terrain-canvas" aria-hidden="true"></canvas>
+        <div id="mainMenuSky" class="main-menu-sky-overlay" aria-hidden="true">
+          <canvas id="mainMenuCloudCanvas" class="main-menu-cloud-canvas" aria-hidden="true"></canvas>
+        </div>
         <div class="mc-menu-vignette" aria-hidden="true"></div>
-        <div class="mc-menu-inner main-menu-card">
-          <div class="mc-title-row">
-            <h1 class="mc-title">MiniCraft</h1>
-            <p class="mc-splash" id="menuSplash">Now with cubes!</p>
+        <section class="mc-menu-inner main-menu-card" aria-labelledby="mainMenuTitle">
+          <header class="main-menu-header">
+            <div class="mc-title-row">
+              <h1 class="mc-title" id="mainMenuTitle">MiniCraft</h1>
+              <p class="mc-splash" id="menuSplash">Now with cubes!</p>
+            </div>
+            <p class="main-menu-tip mc-body">
+              Add <code>?seed=12345</code> to the URL for a fixed world seed.
+            </p>
+          </header>
+          <div class="main-menu-fields">
+            <label class="seed-row mc-body">
+              <span class="seed-label">Seed</span>
+              <input type="text" id="seedInput" inputmode="numeric" autocomplete="off" placeholder="random" />
+            </label>
+            <label class="seed-row mc-body">
+              <span class="seed-label">Name</span>
+              <input type="text" id="playerNameInput" autocomplete="off" placeholder="Steve" maxlength="16" />
+            </label>
           </div>
-          <p class="start-sub mc-body"><code>?seed=12345</code> in the URL fixes the world seed.</p>
-          <label class="seed-row mc-body">
-            <span class="seed-label">Seed</span>
-            <input type="text" id="seedInput" inputmode="numeric" autocomplete="off" placeholder="random" />
-          </label>
           <div class="mode-selector mc-body">
             <span class="mode-label">Mode</span>
             <div class="mode-btns">
@@ -195,6 +225,14 @@
                   <option value="high">High (2048 soft)</option>
                   <option value="balanced">Balanced (1024)</option>
                   <option value="fast">Fast (512 basic)</option>
+                </select>
+              </label>
+              <label class="settings-row">
+                <span>Weather effects (rain FPS)</span>
+                <select id="settingsWeatherEffects" class="mc-body settings-select" aria-label="Weather effects quality">
+                  <option value="full">Full (more streak checks)</option>
+                  <option value="balanced">Balanced (default)</option>
+                  <option value="minimal">Minimal (fastest)</option>
                 </select>
               </label>
               <label class="settings-row">
@@ -248,6 +286,14 @@
               <span>Block break particles</span>
             </label>
             <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsShowMinimap" />
+              <span>Show minimap</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="settingsAmbientMusic" />
+              <span>Ambient music bed (very quiet)</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
               <input type="checkbox" id="leftHandedInput" />
               <span>Left-handed (first-person hand on the left)</span>
             </label>
@@ -261,8 +307,8 @@
                   panels
                 </li>
                 <li>
-                  Left-click break · right-click place · look at furnace, crafting table, or door to
-                  use
+                  Left-click break · right-click place · shovel on grass/dirt tills · seeds on
+                  farmland · look at furnace, crafting table, or door to use
                 </li>
                 <li>
                   Crafting table: 4 planks (2×2) → table; 3×3 on the table · <kbd>E</kbd> or
@@ -276,14 +322,12 @@
               </ul>
             </details>
           </details>
-          <div class="start-actions">
+          <div class="start-actions start-actions-primary">
             <button type="button" id="playBtn" class="mc-btn mc-btn-primary">Play</button>
             <button type="button" id="newWorldBtn" class="mc-btn mc-btn-secondary">New world</button>
-          </div>
-          <div class="start-actions">
             <button type="button" id="loadBtn" class="mc-btn mc-btn-secondary">Load</button>
           </div>
-        </div>
+        </section>
       </div>
 
       <div id="pauseMenu" class="pause-menu hidden" aria-hidden="true">
@@ -339,6 +383,14 @@
                 </select>
               </label>
               <label class="settings-row">
+                <span>Weather effects (rain FPS)</span>
+                <select id="pauseSettingsWeatherEffects" class="mc-body settings-select" aria-label="Weather effects quality">
+                  <option value="full">Full (more streak checks)</option>
+                  <option value="balanced">Balanced (default)</option>
+                  <option value="minimal">Minimal (fastest)</option>
+                </select>
+              </label>
+              <label class="settings-row">
                 <span>Torch lights (near you)</span>
                 <select id="pauseSettingsMaxTorchLights" class="mc-body settings-select" aria-label="Max torch lights">
                   <option value="4">4</option>
@@ -389,6 +441,14 @@
               <span>Block break particles</span>
             </label>
             <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsShowMinimap" />
+              <span>Show minimap</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
+              <input type="checkbox" id="pauseSettingsAmbientMusic" />
+              <span>Ambient music bed (very quiet)</span>
+            </label>
+            <label class="start-option start-option-settings mc-body">
               <input type="checkbox" id="pauseLeftHandedInput" />
               <span>Left-handed (first-person hand on the left)</span>
             </label>
@@ -402,8 +462,8 @@
                   panels
                 </li>
                 <li>
-                  Left-click break · right-click place · look at furnace, crafting table, or door to
-                  use
+                  Left-click break · right-click place · shovel on grass/dirt tills · seeds on
+                  farmland · look at furnace, crafting table, or door to use
                 </li>
                 <li>
                   Crafting table: 4 planks (2×2) → table; 3×3 on the table · <kbd>E</kbd> or
@@ -433,6 +493,6 @@
       </div>
     </div>
     <canvas id="c"></canvas>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

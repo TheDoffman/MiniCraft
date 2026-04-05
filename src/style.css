@@ -181,6 +181,28 @@ body {
   background: linear-gradient(180deg, #1a1a1a 0 1px, #fefefe 1px 2px, #1a1a1a 2px 3px);
 }
 
+#ui.menu-open .minimap-canvas {
+  display: none !important;
+}
+
+.minimap-canvas {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: 96px;
+  height: 96px;
+  z-index: 3;
+  pointer-events: none;
+  image-rendering: pixelated;
+  border: 2px solid rgba(20, 20, 20, 0.75);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12);
+  background: #1a1f24;
+}
+
+.minimap-canvas.hidden {
+  display: none;
+}
+
 #hudBottom {
   position: absolute;
   left: 50%;
@@ -840,13 +862,34 @@ body {
   z-index: 0;
 }
 
-#start .mc-menu-vignette {
+/* Voxel clouds over the sky band (2D canvas); matches in-game drift */
+#start .main-menu-sky-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: min(28vh, 220px);
+  pointer-events: none;
   z-index: 1;
+  overflow: hidden;
+}
+
+#start .main-menu-cloud-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+
+#start .mc-menu-vignette {
+  z-index: 2;
   background: radial-gradient(ellipse 95% 80% at 50% 45%, transparent 35%, rgba(0, 0, 0, 0.42) 100%);
 }
 
 #start .mc-menu-inner {
-  z-index: 2;
+  z-index: 3;
 }
 
 .main-menu-skyband {
@@ -895,17 +938,6 @@ body {
   z-index: 3;
 }
 
-/* Above vignette, same band as sky — voxel clouds drift west like cloudLayer.js */
-.main-menu-cloud-canvas {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 100%;
-  height: min(28vh, 220px);
-  pointer-events: none;
-  z-index: 4;
-}
-
 .mc-menu-inner {
   position: relative;
   z-index: 5;
@@ -918,14 +950,80 @@ body {
 
 .main-menu-card {
   width: 100%;
-  padding: 16px 18px 14px;
+  padding: 18px 20px 16px;
   border: 3px solid #1a1a1a;
-  background: linear-gradient(180deg, rgba(20, 18, 14, 0.72) 0%, rgba(12, 10, 8, 0.82) 100%);
+  background: linear-gradient(180deg, rgba(28, 26, 22, 0.88) 0%, rgba(10, 9, 7, 0.93) 100%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   box-shadow:
     0 0 0 2px #5a5a5a,
     0 0 0 4px #1a1a1a,
     6px 8px 0 rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 48px rgba(0, 0, 0, 0.35);
+}
+
+#start .main-menu-card {
+  animation: main-menu-card-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes main-menu-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #start .main-menu-card {
+    animation: none;
+  }
+}
+
+.main-menu-header {
+  width: 100%;
+  text-align: center;
+}
+
+.main-menu-tip {
+  margin: 0;
+  max-width: 26rem;
+  margin-inline: auto;
+  font-size: 17px;
+  line-height: 1.35;
+  color: #8a8a8a;
+  text-shadow: 1px 1px 0 #1a1a1a;
+}
+
+.main-menu-tip code {
+  font-family: var(--mc-font);
+  font-size: 0.95em;
+  color: #a8d8ff;
+  text-shadow: 1px 1px 0 #000;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 0 5px;
+  border: 2px solid #1a1a1a;
+}
+
+.main-menu-fields {
+  display: grid;
+  gap: 8px 14px;
+  width: 100%;
+}
+
+@media (min-width: 520px) {
+  .main-menu-fields {
+    grid-template-columns: 1fr 1fr;
+    align-items: end;
+  }
+}
+
+.start-actions-primary {
+  margin-top: 6px;
 }
 
 .settings-panel {
@@ -1523,4 +1621,81 @@ body {
   15% { opacity: 1; transform: translateY(0); }
   75% { opacity: 1; }
   100% { opacity: 0; transform: translateY(-6px); }
+}
+
+/* ── World generation loading screen ── */
+
+.world-gen-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a1a2e;
+  background-image:
+    radial-gradient(ellipse at 50% 40%, rgba(60, 60, 120, 0.45) 0%, transparent 70%);
+  cursor: default;
+  pointer-events: auto;
+}
+
+.world-gen-screen.hidden {
+  display: none;
+}
+
+.world-gen-inner {
+  text-align: center;
+  padding: 2rem;
+}
+
+.world-gen-title {
+  font-family: 'Press Start 2P', monospace;
+  color: #e8e8f0;
+  font-size: 1.4rem;
+  margin: 0 0 1.6rem;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  animation: gen-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes gen-pulse {
+  0%, 100% { opacity: 0.82; }
+  50% { opacity: 1; }
+}
+
+.world-gen-bar-track {
+  width: 280px;
+  max-width: 80vw;
+  height: 14px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  overflow: hidden;
+  margin: 0 auto 1rem;
+}
+
+.world-gen-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #5b8c3e 0%, #6fbf4e 60%, #8cdd63 100%);
+  border-radius: 5px;
+  transition: width 0.18s ease;
+}
+
+.world-gen-label {
+  font-family: 'VT323', monospace;
+  color: #aab0c0;
+  font-size: 1rem;
+  margin: 0;
+  letter-spacing: 0.04em;
+}
+
+.world-gen-enter {
+  margin-top: 1.4rem;
+  font-size: 1rem;
+  padding: 0.6rem 2.2rem;
+  animation: gen-pulse 1.6s ease-in-out infinite;
+}
+
+.world-gen-enter.hidden {
+  display: none;
 }
